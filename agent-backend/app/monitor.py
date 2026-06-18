@@ -111,7 +111,8 @@ class RuntimeMonitor:
         if existing:
             return existing
         if anomaly_id in self._diagnosing:
-            while anomaly_id in self._diagnosing:
+            wait_start = time.monotonic()
+            while anomaly_id in self._diagnosing and (time.monotonic() - wait_start) < 30:
                 await asyncio.sleep(0.2)
             existing = next((d for d in self.diagnostics if d.anomaly_id == anomaly_id), None)
             if existing:
@@ -169,12 +170,6 @@ class RuntimeMonitor:
             self._diagnosing.discard(anomaly_id)
 
     async def _detect_anomaly(self, snapshot: RawMetricSnapshot) -> AnomalyEvent | None:
-        anomaly_type = None
-        details = ""
-        current_value = 0.0
-        threshold = 0.0
-        severity = "medium"
-
         # --- Update all streak counters ---
         if snapshot.cpu.percentage > self.config.cpu_threshold:
             self._cpu_streak += 1
@@ -198,44 +193,86 @@ class RuntimeMonitor:
             self._latency_streak = 0
 
         # --- Detect anomalies (priority: CPU > event loop > error rate > latency > memory) ---
-        if self._cpu_streak >= 3 and not self._recent_duplicate(AnomalyType.cpu):
-            anomaly_type = AnomalyType.cpu
-            current_value = snapshot.cpu.percentage
-            threshold = self.config.cpu_threshold
-            severity = self._cpu_severity(snapshot.cpu.percentage)
-            details = f"CPU exceeded threshold for {self._cpu_streak} consecutive polls."
+        # Higher priority active metrics suppress lower ones to avoid cascades.
 
-        elif self._event_loop_streak >= 1 and not self._recent_duplicate(AnomalyType.event_loop):
-            anomaly_type = AnomalyType.event_loop
-            current_value = max(snapshot.event_loop.lag_p99_ms, snapshot.event_loop.lag_max_ms)
-            threshold = self.config.event_loop_lag_threshold_ms
-            if current_value > 500:
-                severity = "critical"
-            elif current_value > 200:
-                severity = "high"
-            else:
-                severity = "medium"
-            details = f"Event loop max lag is {current_value:.1f}ms (threshold: {threshold}ms)"
+        # 1. CPU
+        cpu_active = snapshot.cpu.percentage > self.config.cpu_threshold
+        if self._cpu_streak >= 3:
+            if not self._recent_duplicate(AnomalyType.cpu):
+                return await self._trigger_anomaly(
+                    AnomalyType.cpu,
+                    snapshot.cpu.percentage,
+                    self.config.cpu_threshold,
+                    self._cpu_severity(snapshot.cpu.percentage),
+                    f"CPU exceeded threshold for {self._cpu_streak} consecutive polls."
+                )
+            return None # Already reported; suppress others.
+        if cpu_active: return None
 
-        elif self._error_rate_streak >= 2 and not self._recent_duplicate(AnomalyType.error_rate):
-            anomaly_type = AnomalyType.error_rate
-            current_value = snapshot.error_rate.rate_per_second
-            threshold = self.config.error_rate_threshold
-            if current_value > 5.0:
-                severity = "critical"
-            elif current_value > 2.0:
-                severity = "high"
-            else:
-                severity = "medium"
-            details = f"Error rate is {current_value:.2f} errors/sec (threshold: {threshold}/s)"
+        # 2. Event Loop
+        event_loop_val = max(snapshot.event_loop.lag_p99_ms, snapshot.event_loop.lag_max_ms)
+        event_loop_active = event_loop_val > self.config.event_loop_lag_threshold_ms
+        if self._event_loop_streak >= 3:
+            if not self._recent_duplicate(AnomalyType.event_loop):
+                sev = "critical" if event_loop_val > 500 else ("high" if event_loop_val > 200 else "medium")
+                return await self._trigger_anomaly(
+                    AnomalyType.event_loop,
+                    event_loop_val,
+                    self.config.event_loop_lag_threshold_ms,
+                    sev,
+                    f"Event loop max lag is {event_loop_val:.1f}ms (threshold: {self.config.event_loop_lag_threshold_ms}ms)"
+                )
+            return None
+        if event_loop_active: return None
 
-        else:
-            # Memory and Latency anomaly detection are removed
-            pass
+        # 3. Error Rate
+        error_rate_active = snapshot.error_rate.rate_per_second > self.config.error_rate_threshold
+        if self._error_rate_streak >= 3:
+            if not self._recent_duplicate(AnomalyType.error_rate):
+                val = snapshot.error_rate.rate_per_second
+                sev = "critical" if val > 5.0 else ("high" if val > 2.0 else "medium")
+                return await self._trigger_anomaly(
+                    AnomalyType.error_rate,
+                    val,
+                    self.config.error_rate_threshold,
+                    sev,
+                    f"Error rate is {val:.2f} errors/sec (threshold: {self.config.error_rate_threshold}/s)"
+                )
+            return None
+        if error_rate_active: return None
 
-        if not anomaly_type:
+        # 4. Latency
+        latency_active = snapshot.response_latency.p99_ms > self.config.latency_p99_threshold_ms and snapshot.response_latency.sample_size > 0
+        if self._latency_streak >= 3:
+            if not self._recent_duplicate(AnomalyType.latency):
+                val = snapshot.response_latency.p99_ms
+                sev = "high" if val > 2000 else "medium"
+                return await self._trigger_anomaly(
+                    AnomalyType.latency,
+                    val,
+                    self.config.latency_p99_threshold_ms,
+                    sev,
+                    f"P99 latency is {val:.1f}ms (threshold: {self.config.latency_p99_threshold_ms}ms)"
+                )
+            return None
+        if latency_active: return None
+
+        # 5. Memory Leak
+        growth = self._memory_growth_rate_mb_per_minute()
+        if growth > self.config.memory_growth_rate:
+            if not self._recent_duplicate(AnomalyType.memory):
+                return await self._trigger_anomaly(
+                    AnomalyType.memory,
+                    growth,
+                    self.config.memory_growth_rate,
+                    self._memory_severity(growth),
+                    f"Heap growth rate is {growth:.2f} MB/min (threshold: {self.config.memory_growth_rate} MB/min)"
+                )
             return None
 
+        return None
+
+    async def _trigger_anomaly(self, type: AnomalyType, current_value: float, threshold: float, severity: str, details: str) -> AnomalyEvent:
         # Fetch real profiling data dynamically
         call_stack = []
         try:
@@ -248,7 +285,7 @@ class RuntimeMonitor:
             pass
 
         return AnomalyEvent(
-            type=anomaly_type,
+            type=type,
             current_value=current_value,
             threshold=threshold,
             severity=severity,
@@ -259,12 +296,13 @@ class RuntimeMonitor:
 
     def _memory_growth_rate_mb_per_minute(self) -> float:
         points = self.metrics_history[-12:]
-        if len(points) < 12:
+        if len(points) < 4:
             return 0.0
         first = points[0]
         last = points[-1]
         seconds = max(1.0, (last.timestamp - first.timestamp).total_seconds())
-        growth_mb = last.memory.heap_used_mb - first.memory.heap_used_mb
+        # Use RSS for a more inclusive measure of memory growth (includes heap, external, etc.)
+        growth_mb = last.memory.rss_mb - first.memory.rss_mb
         return max(0.0, growth_mb / seconds * 60)
 
     def _recent_duplicate(self, anomaly_type: AnomalyType) -> bool:
