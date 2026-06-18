@@ -1,4 +1,4 @@
-# AI Runtime Monitor 🚀
+# AI Runtime Monitor 
 
 An autonomous AI agent designed to diagnose performance incidents (CPU spikes, memory leaks) in Node.js applications at runtime. The system uses native V8 profiling, Tree-sitter AST parsing, and the Gemini 3.1 Pro API to instantly pinpoint root causes in your source code without requiring manual investigation.
 
