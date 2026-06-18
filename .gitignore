@@ -1,0 +1,11 @@
+node_modules/
+.venv/
+__pycache__/
+*.pyc
+.env
+.DS_Store
+data/
+agent-backend/data/
+target-app/node_modules/
+frontend/.next/
+frontend/node_modules/
