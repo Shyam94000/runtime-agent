@@ -1,6 +1,7 @@
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI, HTTPException, Query, WebSocket, WebSocketDisconnect
+from fastapi.responses import StreamingResponse
 from fastapi.middleware.cors import CORSMiddleware
 
 from app.config import settings
@@ -164,12 +165,133 @@ async def provider_status():
     return llm_router.status()
 
 
+@app.get("/api/usage")
+async def usage_stats():
+    """Aggregate token usage and cost statistics from agent traces."""
+    from app.pricing import estimate_cost
+
+    total_input = 0
+    total_output = 0
+    total_cost = 0.0
+    by_model: dict[str, dict] = {}
+
+    for trace in monitor.agent_traces:
+        total_input += trace.total_input_tokens
+        total_output += trace.total_output_tokens
+        total_cost += trace.estimated_cost_usd
+
+        model = trace.model_used or "unknown"
+        if model not in by_model:
+            by_model[model] = {"input_tokens": 0, "output_tokens": 0, "total_tokens": 0, "cost_usd": 0.0, "calls": 0}
+        by_model[model]["input_tokens"] += trace.total_input_tokens
+        by_model[model]["output_tokens"] += trace.total_output_tokens
+        by_model[model]["total_tokens"] += trace.total_input_tokens + trace.total_output_tokens
+        by_model[model]["cost_usd"] += trace.estimated_cost_usd
+        by_model[model]["calls"] += 1
+
+    # Also tally chat usage from router logs
+    chat_tokens = {"input": 0, "output": 0, "total": 0}
+    for log in llm_router.logs:
+        if log.get("anomaly_id") == "chat" and log.get("status") == "success":
+            chat_tokens["input"] += log.get("input_tokens", 0)
+            chat_tokens["output"] += log.get("output_tokens", 0)
+            chat_tokens["total"] += log.get("total_tokens", 0)
+
+    return {
+        "diagnostics": {
+            "total_input_tokens": total_input,
+            "total_output_tokens": total_output,
+            "total_tokens": total_input + total_output,
+            "total_cost_usd": round(total_cost, 4),
+            "total_diagnoses": len(monitor.agent_traces),
+        },
+        "chat": chat_tokens,
+        "by_model": by_model,
+    }
+
+
+
+@app.get("/api/usage")
+async def usage_stats():
+    """Aggregate token usage and cost statistics from agent traces."""
+    from app.pricing import estimate_cost
+
+    total_input = 0
+    total_output = 0
+    total_cost = 0.0
+    by_model: dict[str, dict] = {}
+
+    for trace in monitor.agent_traces:
+        total_input += getattr(trace, 'total_input_tokens', 0)
+        total_output += getattr(trace, 'total_output_tokens', 0)
+        total_cost += getattr(trace, 'estimated_cost_usd', 0.0)
+
+        model = trace.model_used or "unknown"
+        if model not in by_model:
+            by_model[model] = {"input_tokens": 0, "output_tokens": 0, "total_tokens": 0, "cost_usd": 0.0, "calls": 0}
+        by_model[model]["input_tokens"] += getattr(trace, 'total_input_tokens', 0)
+        by_model[model]["output_tokens"] += getattr(trace, 'total_output_tokens', 0)
+        by_model[model]["total_tokens"] += getattr(trace, 'total_input_tokens', 0) + getattr(trace, 'total_output_tokens', 0)
+        by_model[model]["cost_usd"] += getattr(trace, 'estimated_cost_usd', 0.0)
+        by_model[model]["calls"] += 1
+
+    # Also tally chat usage from router logs
+    chat_tokens = {"input": 0, "output": 0, "total": 0}
+    for log in llm_router.logs:
+        if log.get("anomaly_id") == "chat" and log.get("status") == "success":
+            chat_tokens["input"] += log.get("input_tokens", 0)
+            chat_tokens["output"] += log.get("output_tokens", 0)
+            chat_tokens["total"] += log.get("total_tokens", 0)
+
+    return {
+        "diagnostics": {
+            "total_input_tokens": total_input,
+            "total_output_tokens": total_output,
+            "total_tokens": total_input + total_output,
+            "total_cost_usd": round(total_cost, 4),
+            "total_diagnoses": len(monitor.agent_traces),
+        },
+        "chat": chat_tokens,
+        "by_model": by_model,
+    }
+
+
+@app.post("/api/chat/stream")
+async def chat_stream(request: ChatRequest):
+    from app.models import utc_now
+    
+    if not llm_router.providers:
+        raise HTTPException(status_code=503, detail="No LLM providers configured")
+        
+    full_context = monitor.memory.build_full_context()
+    prompt = f"CONTEXT:\n{full_context}\n\nUSER QUESTION:\n{request.message}"
+    
+    def generate():
+        generator = llm_router.generate_stream(prompt=prompt, system_prompt=CHAT_SYSTEM_PROMPT)
+        for chunk in generator:
+            yield chunk
+
+    return StreamingResponse(generate(), media_type="text/event-stream")
+
 @app.post("/api/chat")
 async def chat(request: ChatRequest):
     from app.models import utc_now
 
     if not llm_router.providers:
         return {"role": "agent", "content": "Chat requires at least one LLM API key to be configured.", "timestamp": utc_now().isoformat()}
+
+    if len(request.message) > 2000:
+        return {"role": "agent", "content": "Error: Message is too long (max 2000 characters).", "timestamp": utc_now().isoformat()}
+        
+    # Basic system prompt injection protection
+    suspicious_patterns = [
+        "ignore previous instructions",
+        "you are now",
+        "forget everything",
+        "system prompt"
+    ]
+    if any(p in request.message.lower() for p in suspicious_patterns):
+        return {"role": "agent", "content": "I am a diagnostic agent and cannot process requests to change my core instructions.", "timestamp": utc_now().isoformat()}
 
     if monitor.config.llm_kill_switch:
         return {"role": "agent", "content": "Chat is currently disabled because the LLM Kill Switch is enabled in settings.", "timestamp": utc_now().isoformat()}
@@ -178,12 +300,22 @@ async def chat(request: ChatRequest):
         full_context = monitor.memory.build_full_context()
         prompt = f"CONTEXT:\n{full_context}\n\nUSER QUESTION:\n{request.message}"
 
-        response_text = llm_router.generate_simple(
+        response = llm_router.generate_simple(
             prompt=prompt,
             system_prompt=CHAT_SYSTEM_PROMPT,
         )
 
-        return {"role": "agent", "content": response_text, "timestamp": utc_now().isoformat()}
+        return {
+            "role": "agent",
+            "content": response.text or "",
+            "timestamp": utc_now().isoformat(),
+            "tokens": {
+                "input": response.input_tokens,
+                "output": response.output_tokens,
+                "total": response.total_tokens,
+            },
+            "model": f"{response.provider_name}/{response.model_name}",
+        }
     except Exception as e:
         return {"role": "agent", "content": f"Error: {str(e)}", "timestamp": utc_now().isoformat()}
 

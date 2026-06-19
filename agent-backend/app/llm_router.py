@@ -38,6 +38,12 @@ class LLMResponse:
     provider_name: str = ""
     model_name: str = ""
     raw: Any = None  # keep the raw provider response for debugging
+    input_tokens: int = 0
+    output_tokens: int = 0
+    total_tokens: int = 0
+    input_tokens: int = 0
+    output_tokens: int = 0
+    total_tokens: int = 0
 
 
 # ---------------------------------------------------------------------------
@@ -119,6 +125,7 @@ class LLMProvider(ABC):
         messages: list[dict],
         tools: list[Callable] | None = None,
         system_prompt: str | None = None,
+        response_schema: Any = None,
     ) -> LLMResponse:
         ...
 
@@ -141,6 +148,7 @@ class GeminiProvider(LLMProvider):
         messages: list[dict],
         tools: list[Callable] | None = None,
         system_prompt: str | None = None,
+        response_schema: Any = None,
     ) -> LLMResponse:
         from google import genai
         from google.genai import types
@@ -199,6 +207,9 @@ class GeminiProvider(LLMProvider):
             tools=tools or [],
             automatic_function_calling=types.AutomaticFunctionCallingConfig(disable=True),
         )
+        if response_schema:
+            config.response_mime_type = "application/json"
+            config.response_schema = response_schema
 
         response = client.models.generate_content(
             model=self.model,
@@ -222,7 +233,47 @@ class GeminiProvider(LLMProvider):
             elif part.text:
                 result.text = (result.text or "") + part.text
 
+        # Extract token usage from Gemini response
+        try:
+            usage = getattr(response, 'usage_metadata', None)
+            if usage:
+                result.input_tokens = getattr(usage, 'prompt_token_count', 0) or 0
+                result.output_tokens = getattr(usage, 'candidates_token_count', 0) or 0
+                result.total_tokens = getattr(usage, 'total_token_count', 0) or 0
+        except Exception:
+            pass  # Token extraction is best-effort
+
+
+        # Extract token usage from Gemini response
+        try:
+            usage = getattr(response, 'usage_metadata', None)
+            if usage:
+                result.input_tokens = getattr(usage, 'prompt_token_count', 0) or 0
+                result.output_tokens = getattr(usage, 'candidates_token_count', 0) or 0
+                result.total_tokens = getattr(usage, 'total_token_count', 0) or 0
+        except Exception:
+            pass  # Token extraction is best-effort
+
         return result
+
+    def stream(self, messages: list[dict], system_prompt: str | None = None):
+        from google import genai
+        from google.genai import types
+        client = genai.Client(api_key=self.api_key, http_options={'retry_options': {'attempts': 1}})
+        
+        contents = []
+        for msg in messages:
+            contents.append(types.Content(role=msg["role"] if msg["role"] == "model" else "user", parts=[types.Part.from_text(text=msg["content"])]))
+            
+        config = types.GenerateContentConfig(system_instruction=system_prompt or "")
+        
+        try:
+            response = client.models.generate_content_stream(model=self.model, contents=contents, config=config)
+            for chunk in response:
+                if chunk.text:
+                    yield chunk.text
+        except Exception as e:
+            raise e
 
 
 # ---------------------------------------------------------------------------
@@ -252,6 +303,7 @@ class OpenAICompatibleProvider(LLMProvider):
         messages: list[dict],
         tools: list[Callable] | None = None,
         system_prompt: str | None = None,
+        response_schema: Any = None,
     ) -> LLMResponse:
         from openai import OpenAI
 
@@ -302,6 +354,17 @@ class OpenAICompatibleProvider(LLMProvider):
         }
         if tool_schemas:
             kwargs["tools"] = tool_schemas
+        
+        # Note: OpenRouter/NIM might have varying support for response_format, 
+        # but standard OpenAI schema format is used here
+        if response_schema:
+            kwargs["response_format"] = {
+                "type": "json_schema",
+                "json_schema": {
+                    "name": response_schema.__name__,
+                    "schema": response_schema.model_json_schema()
+                }
+            }
 
         response = client.chat.completions.create(**kwargs)
 
@@ -327,7 +390,46 @@ class OpenAICompatibleProvider(LLMProvider):
                     arguments=args,
                 ))
 
+        # Extract token usage from OpenAI-compatible response
+        try:
+            usage = getattr(response, 'usage', None)
+            if usage:
+                result.input_tokens = getattr(usage, 'prompt_tokens', 0) or 0
+                result.output_tokens = getattr(usage, 'completion_tokens', 0) or 0
+                result.total_tokens = getattr(usage, 'total_tokens', 0) or 0
+        except Exception:
+            pass  # Token extraction is best-effort
+
+
+        # Extract token usage from OpenAI-compatible response
+        try:
+            usage = getattr(response, 'usage', None)
+            if usage:
+                result.input_tokens = getattr(usage, 'prompt_tokens', 0) or 0
+                result.output_tokens = getattr(usage, 'completion_tokens', 0) or 0
+                result.total_tokens = getattr(usage, 'total_tokens', 0) or 0
+        except Exception:
+            pass  # Token extraction is best-effort
+
         return result
+
+    def stream(self, messages: list[dict], system_prompt: str | None = None):
+        from openai import OpenAI
+        client = OpenAI(api_key=self.api_key, base_url=self.base_url, default_headers=self.extra_headers or None, max_retries=0)
+        
+        oai_messages = []
+        if system_prompt:
+            oai_messages.append({"role": "system", "content": system_prompt})
+        for msg in messages:
+            oai_messages.append({"role": "assistant" if msg["role"] == "model" else "user", "content": msg["content"]})
+            
+        try:
+            response = client.chat.completions.create(model=self.model, messages=oai_messages, stream=True)
+            for chunk in response:
+                if chunk.choices and chunk.choices[0].delta and chunk.choices[0].delta.content:
+                    yield chunk.choices[0].delta.content
+        except Exception as e:
+            raise e
 
 
 # ---------------------------------------------------------------------------
@@ -357,7 +459,15 @@ class LLMRouter:
                 model=settings.gemini_model,
             ))
 
-        # NVIDIA NIM (DeepSeek V4 Flash — fallback #1, fastest at ~0.5s)
+        # Gemini 2 (fallback #1)
+        if settings.gemini_api_key_2:
+            self.providers.append(GeminiProvider(
+                api_key=settings.gemini_api_key_2,
+                name="gemini-2",
+                model=settings.gemini_model,
+            ))
+
+        # NVIDIA NIM (DeepSeek V4 Flash — fallback #2, fastest at ~0.5s)
         if settings.nvidia_nim_api_key:
             self.providers.append(OpenAICompatibleProvider(
                 api_key=settings.nvidia_nim_api_key,
@@ -385,6 +495,7 @@ class LLMRouter:
         tools: list[Callable] | None = None,
         system_prompt: str | None = None,
         anomaly_id: str | None = None,
+        response_schema: Any = None,
     ) -> LLMResponse:
         """Try each provider in priority order until one succeeds."""
         errors: list[str] = []
@@ -393,10 +504,24 @@ class LLMRouter:
             from datetime import datetime, timezone
             return datetime.now(timezone.utc).isoformat()
 
+        def add_log(entry: dict):
+            self.logs.append(entry)
+            self.logs = self.logs[-200:]
+            try:
+                from app.main import monitor
+                if getattr(monitor, "loop", None):
+                    import asyncio
+                    asyncio.run_coroutine_threadsafe(
+                        monitor.broadcast({"type": "logs_updated", "data": self.logs}),
+                        monitor.loop
+                    )
+            except Exception:
+                pass
+
         attempt_num = 0
         for provider in self.providers:
             if not provider.is_available:
-                self.logs.append({
+                add_log({
                     "timestamp": utc_now_iso(),
                     "provider": provider.name,
                     "model": provider.model,
@@ -404,7 +529,6 @@ class LLMRouter:
                     "anomaly_id": anomaly_id or "chat",
                     "status": "cooling down",
                 })
-                self.logs = self.logs[-200:]
                 errors.append(f"{provider.name}: cooling down")
                 continue
 
@@ -412,10 +536,10 @@ class LLMRouter:
             start_time = time.time()
             try:
                 print(f"[LLMRouter] Trying {provider.name} ({provider.model})...")
-                response = provider.generate(messages, tools, system_prompt)
+                response = provider.generate(messages, tools, system_prompt, response_schema=response_schema)
                 print(f"[LLMRouter] [OK] Success via {provider.name}")
 
-                self.logs.append({
+                add_log({
                     "timestamp": utc_now_iso(),
                     "provider": provider.name,
                     "model": provider.model,
@@ -423,13 +547,15 @@ class LLMRouter:
                     "anomaly_id": anomaly_id or "chat",
                     "status": "success",
                     "duration_ms": round((time.time() - start_time) * 1000, 1),
+                    "input_tokens": response.input_tokens,
+                    "output_tokens": response.output_tokens,
+                    "total_tokens": response.total_tokens,
                 })
-                self.logs = self.logs[-200:]
                 return response
 
             except Exception as e:
                 err_str = str(e)
-                self.logs.append({
+                add_log({
                     "timestamp": utc_now_iso(),
                     "provider": provider.name,
                     "model": provider.model,
@@ -439,7 +565,6 @@ class LLMRouter:
                     "error": err_str[:150],
                     "duration_ms": round((time.time() - start_time) * 1000, 1),
                 })
-                self.logs = self.logs[-200:]
 
                 is_rate_limit = any(code in err_str for code in ["429", "503", "RESOURCE_EXHAUSTED", "rate_limit", "quota"])
                 is_transient = "temporar" in err_str.lower() or "overloaded" in err_str.lower()
@@ -460,11 +585,24 @@ class LLMRouter:
             + "\n".join(f"  - {e}" for e in errors)
         )
 
-    def generate_simple(self, prompt: str, system_prompt: str | None = None) -> str:
+    def generate_simple(self, prompt: str, system_prompt: str | None = None) -> LLMResponse:
         """Convenience method for simple text-in/text-out calls (e.g. chat)."""
         messages = [{"role": "user", "content": prompt}]
-        response = self.generate(messages, tools=None, system_prompt=system_prompt)
-        return response.text or ""
+        return self.generate(messages, tools=None, system_prompt=system_prompt)
+
+    def generate_stream(self, prompt: str, system_prompt: str | None = None):
+        messages = [{"role": "user", "content": prompt}]
+        for provider in self.providers:
+            if not provider.is_available:
+                continue
+            try:
+                print(f"[LLMRouter] Streaming via {provider.name} ({provider.model})...")
+                return provider.stream(messages, system_prompt)
+            except Exception as e:
+                print(f"[LLMRouter] [Error] Streaming failed via {provider.name}: {e}")
+                provider.enter_cooldown(10.0)
+        raise RuntimeError("All LLM providers failed to stream.")
+
 
     def status(self) -> list[dict]:
         """Return the current status of all providers (for debugging/monitoring)."""

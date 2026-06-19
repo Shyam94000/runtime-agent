@@ -187,6 +187,8 @@ class AgentStep(BaseModel):
     tool_result_summary: str | None = None
     reasoning: str | None = None
     duration_ms: float | None = None
+    input_tokens: int = 0
+    output_tokens: int = 0
 
 
 class AgentTrace(BaseModel):
@@ -199,6 +201,10 @@ class AgentTrace(BaseModel):
     total_steps: int = 0
     total_duration_ms: float | None = None
     model_used: str = ""
+    total_input_tokens: int = 0
+    total_output_tokens: int = 0
+    total_tokens: int = 0
+    estimated_cost_usd: float = 0.0
 
 
 class ChatMessage(BaseModel):

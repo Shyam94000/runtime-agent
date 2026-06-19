@@ -13,14 +13,28 @@ from app.prompts import (
     SINGLE_CALL_DIAGNOSIS_SYSTEM_PROMPT,
 )
 from app.agent_tools import create_tools
+from pydantic import BaseModel, Field
 from app.agent_memory import AgentMemory
+from app.pricing import estimate_cost
 from app.llm_router import router, LLMResponse
+from app.pricing import estimate_cost
 
 
 def utc_now():
     from datetime import datetime, timezone
     return datetime.now(timezone.utc)
 
+
+
+class DiagnosticResponseSchema(BaseModel):
+    root_cause_summary: str = Field(description="A short summary of the root cause.")
+    root_cause_function: str = Field(description="The function name where the anomaly originated.", default="")
+    root_cause_file: str = Field(description="The file name where the anomaly originated.", default="")
+    root_cause_lines: str = Field(description="The line numbers where the anomaly originated.", default="")
+    explanation: str = Field(description="A detailed explanation of the root cause.")
+    suggested_fix: str = Field(description="A suggested fix for the anomaly.")
+    fix_justification: str = Field(description="A justification for the suggested fix.")
+    confidence_score: float = Field(description="Confidence score between 0.0 and 1.0.", default=0.75)
 
 class AgenticDiagnosticAgent:
     def __init__(self, tool_context) -> None:
@@ -132,10 +146,15 @@ class AgenticDiagnosticAgent:
             tools=None,
             system_prompt=SINGLE_CALL_DIAGNOSIS_SYSTEM_PROMPT,
             anomaly_id=anomaly.id,
+            response_schema=DiagnosticResponseSchema
         )
         actual_model = f"{response.provider_name}/{response.model_name}"
         trace.model_used = actual_model
-        payload = self._parse_json_response(response.text or "")
+        
+        try:
+            payload = json.loads(response.text or "{}")
+        except json.JSONDecodeError:
+            payload = {}
 
         trace.status = "completed"
         trace.completed_at = utc_now()
@@ -144,8 +163,14 @@ class AgenticDiagnosticAgent:
             type="conclusion",
             reasoning=str(payload.get("root_cause_summary") or "Single-call diagnosis completed."),
             duration_ms=(time.time() - start_time) * 1000,
+            input_tokens=response.input_tokens,
+            output_tokens=response.output_tokens,
         ))
         trace.total_steps = len(trace.steps)
+        trace.total_input_tokens = response.input_tokens
+        trace.total_output_tokens = response.output_tokens
+        trace.total_tokens = response.total_tokens
+        trace.estimated_cost_usd = estimate_cost(response.model_name, response.input_tokens, response.output_tokens)
 
         return DiagnosticReport(
             anomaly_id=anomaly.id,
@@ -164,21 +189,6 @@ class AgenticDiagnosticAgent:
             confidence_score=float(payload.get("confidence_score") or 0.75),
             source_code_context=source if source_context else "",
         )
-
-    def _parse_json_response(self, text: str) -> dict[str, Any]:
-        cleaned = text.strip()
-        fenced = re.search(r"```(?:json)?\s*(\{.*?\})\s*```", cleaned, flags=re.DOTALL)
-        if fenced:
-            cleaned = fenced.group(1)
-        else:
-            start = cleaned.find("{")
-            end = cleaned.rfind("}")
-            if start != -1 and end != -1 and end > start:
-                cleaned = cleaned[start:end + 1]
-        parsed = json.loads(cleaned)
-        if not isinstance(parsed, dict):
-            raise ValueError("Diagnosis response was not a JSON object.")
-        return parsed
 
     def _run_agent_loop(
         self,
@@ -245,6 +255,8 @@ class AgenticDiagnosticAgent:
                     tool_name=tool_name,
                     tool_args=tool_args,
                     duration_ms=(time.time() - start_time) * 1000,
+                    input_tokens=response.input_tokens,
+                    output_tokens=response.output_tokens,
                 )
 
                 try:
@@ -265,6 +277,14 @@ class AgenticDiagnosticAgent:
                     trace.status = "completed"
                     trace.completed_at = utc_now()
                     trace.total_steps = len(trace.steps)
+                    trace.total_input_tokens = sum(s.input_tokens for s in trace.steps)
+                    trace.total_output_tokens = sum(s.output_tokens for s in trace.steps)
+                    trace.total_tokens = trace.total_input_tokens + trace.total_output_tokens
+                    trace.estimated_cost_usd = estimate_cost(actual_model, trace.total_input_tokens, trace.total_output_tokens)
+                    trace.total_input_tokens = sum(s.input_tokens for s in trace.steps)
+                    trace.total_output_tokens = sum(s.output_tokens for s in trace.steps)
+                    trace.total_tokens = trace.total_input_tokens + trace.total_output_tokens
+                    trace.estimated_cost_usd = estimate_cost(response.model_name, trace.total_input_tokens, trace.total_output_tokens)
 
                     return DiagnosticReport(
                         anomaly_id=anomaly.id,
@@ -307,6 +327,8 @@ class AgenticDiagnosticAgent:
                     type="thinking",
                     reasoning=response.text[:1000],
                     duration_ms=(time.time() - start_time) * 1000,
+                    input_tokens=response.input_tokens,
+                    output_tokens=response.output_tokens,
                 ))
                 messages.append({
                     "role": "assistant",
@@ -316,6 +338,14 @@ class AgenticDiagnosticAgent:
         trace.status = "failed"
         trace.completed_at = utc_now()
         trace.total_steps = len(trace.steps)
+        trace.total_input_tokens = sum(s.input_tokens for s in trace.steps)
+        trace.total_output_tokens = sum(s.output_tokens for s in trace.steps)
+        trace.total_tokens = trace.total_input_tokens + trace.total_output_tokens
+        trace.estimated_cost_usd = estimate_cost(actual_model, trace.total_input_tokens, trace.total_output_tokens)
+        trace.total_input_tokens = sum(s.input_tokens for s in trace.steps)
+        trace.total_output_tokens = sum(s.output_tokens for s in trace.steps)
+        trace.total_tokens = trace.total_input_tokens + trace.total_output_tokens
+        trace.estimated_cost_usd = estimate_cost(actual_model, trace.total_input_tokens, trace.total_output_tokens)
         return self._create_error_report(anomaly, "Agent reached max steps without submitting a diagnosis.")
 
     def _create_error_report(

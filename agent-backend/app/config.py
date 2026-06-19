@@ -7,6 +7,7 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 class Settings(BaseSettings):
     # Gemini (primary provider)
     gemini_api_key: str = Field(default="", alias="GEMINI_API_KEY")
+    gemini_api_key_2: str = Field(default="", alias="GEMINI_API_KEY_2")
     gemini_model: str = Field(default="gemini-3.1-flash-lite", alias="GEMINI_MODEL")
 
     # NVIDIA NIM (fallback #1)

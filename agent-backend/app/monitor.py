@@ -21,7 +21,7 @@ from app.models import (
     AgentTrace,
     AgentStep,
 )
-from app.storage import JsonStore
+from app.database import SQLiteStore
 from fastapi import WebSocket
 import websockets
 import json
@@ -39,7 +39,7 @@ class RuntimeMonitor:
         )
         self.metrics_history: list[RawMetricSnapshot] = []
         self.target_app_url = settings.target_app_url
-        self.store = JsonStore()
+        self.store = SQLiteStore()
         try:
             res = self.store.load()
             if len(res) == 3:
@@ -81,6 +81,7 @@ class RuntimeMonitor:
         if self._task and not self._task.done():
             return
         self.monitoring_active = True
+        self.loop = asyncio.get_running_loop()
         self._task = asyncio.create_task(self._run_loop())
 
     async def stop(self) -> None:
@@ -112,7 +113,7 @@ class RuntimeMonitor:
                         if anomaly:
                             self.anomalies.insert(0, anomaly)
                             self.anomalies = self.anomalies[:200]
-                            self.store.save(self.anomalies, self.diagnostics, self.agent_traces)
+                            self._save()
                             print(f"Starting diagnosis for {anomaly.id}")
                             asyncio.create_task(self.diagnose_anomaly(anomaly.id))
                             await self.broadcast({"type": "anomaly_detected", "data": anomaly.model_dump(mode="json")})
@@ -129,6 +130,12 @@ class RuntimeMonitor:
                 self.last_error = str(exc)
                 await asyncio.sleep(2)
 
+    def _save(self):
+        try:
+            self.store.save_all(self.anomalies, self.diagnostics, self.agent_traces)
+        except Exception as e:
+            print(f"Failed to save data to store: {e}")
+
     async def poll_once(self) -> RawMetricSnapshot | None:
         try:
             async with httpx.AsyncClient(timeout=5) as client:
@@ -144,7 +151,7 @@ class RuntimeMonitor:
             if anomaly:
                 self.anomalies.insert(0, anomaly)
                 self.anomalies = self.anomalies[:200]
-                self.store.save(self.anomalies, self.diagnostics, self.agent_traces)
+                self._save()
                 print(f"Starting diagnosis for {anomaly.id}"); asyncio.create_task(self.diagnose_anomaly(anomaly.id))
                 await self.broadcast({"type": "anomaly_detected", "data": anomaly.model_dump(mode="json")})
             return snapshot
@@ -201,7 +208,7 @@ class RuntimeMonitor:
             self.agent_traces.insert(0, trace)
             self.agent_traces = self.agent_traces[:100]
             anomaly.status = "diagnosed"
-            self.store.save(self.anomalies, self.diagnostics, self.agent_traces)
+            self._save()
             await self.broadcast({
                 "type": "diagnostic_completed",
                 "data": report.model_dump(mode="json"),
@@ -217,7 +224,7 @@ class RuntimeMonitor:
             self.agent_traces.insert(0, trace)
             self.agent_traces = self.agent_traces[:100]
             anomaly.status = "diagnosed"
-            self.store.save(self.anomalies, self.diagnostics, self.agent_traces)
+            self._save()
             await self.broadcast({
                 "type": "diagnostic_completed",
                 "data": report.model_dump(mode="json"),
@@ -350,7 +357,7 @@ class RuntimeMonitor:
             val,
             self.config.network_latency_threshold_ms,
             sev,
-            f"External network latency reached {val:.1f}ms.",
+            f"Slow API response time reached {val:.1f}ms.",
         )
 
     def _detect_cpu_spike(self, snapshot: RawMetricSnapshot) -> tuple[AnomalyType, float, float, str, str] | None:
@@ -613,7 +620,7 @@ class RuntimeMonitor:
         self.anomalies = []
         self.diagnostics = []
         self.agent_traces = []
-        self.store.save(self.anomalies, self.diagnostics, self.agent_traces)
+        self._save()
 
     def status(self) -> SystemStatus:
         return SystemStatus(

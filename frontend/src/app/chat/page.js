@@ -13,6 +13,7 @@ export default function ChatPage() {
     endRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [messages]);
 
+
   const sendMessage = async (e) => {
     e.preventDefault();
     if (!input.trim() || loading) return;
@@ -23,13 +24,46 @@ export default function ChatPage() {
     setLoading(true);
 
     try {
-      const res = await fetch('http://localhost:8000/api/chat', {
+      // Add a placeholder message for the assistant
+      setMessages(prev => [...prev, { role: 'agent', content: '', streaming: true }]);
+      
+      const res = await fetch('http://localhost:8000/api/chat/stream', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ message: input })
       });
-      const data = await res.json();
-      setMessages(prev => [...prev, data]);
+      
+      if (!res.ok) throw new Error('Stream failed');
+      
+      const reader = res.body.getReader();
+      const decoder = new TextDecoder('utf-8');
+      
+      let done = false;
+      while (!done) {
+        const { value, done: readerDone } = await reader.read();
+        done = readerDone;
+        if (value) {
+          const chunk = decoder.decode(value, { stream: true });
+          setMessages(prev => {
+            const newMessages = [...prev];
+            const lastMsg = newMessages[newMessages.length - 1];
+            if (lastMsg.role === 'agent' && lastMsg.streaming) {
+              lastMsg.content += chunk;
+            }
+            return newMessages;
+          });
+        }
+      }
+      
+      // Mark as done streaming
+      setMessages(prev => {
+        const newMessages = [...prev];
+        const lastMsg = newMessages[newMessages.length - 1];
+        if (lastMsg.role === 'agent') {
+          lastMsg.streaming = false;
+        }
+        return newMessages;
+      });
     } catch (err) {
       setMessages(prev => [...prev, { role: 'agent', content: 'Failed to reach the agent.' }]);
     } finally {
@@ -75,8 +109,15 @@ export default function ChatPage() {
                 animate={{ opacity: 1, y: 0, scale: 1 }}
                 className={`flex ${msg.role === 'user' ? 'justify-end' : 'justify-start'}`}
               >
-                <div className={`px-5 py-3 max-w-3xl rounded-2xl shadow-sm ${msg.role === 'user' ? 'bg-blue-600/90 text-white rounded-br-none' : 'bg-gray-800 border border-gray-700 text-gray-200 rounded-bl-none'}`}>
-                  <pre className="whitespace-pre-wrap font-sans text-[15px] leading-relaxed">{msg.content}</pre>
+                <div style={{ maxWidth: '48rem' }}>
+                  <div className={`px-5 py-3 rounded-2xl shadow-sm ${msg.role === 'user' ? 'bg-blue-600/90 text-white rounded-br-none' : 'bg-gray-800 border border-gray-700 text-gray-200 rounded-bl-none'}`}>
+                    <pre className="whitespace-pre-wrap font-sans text-[15px] leading-relaxed">{msg.content}</pre>
+                  </div>
+                  {msg.role !== 'user' && msg.tokens && (
+                    <div style={{ marginTop: '6px', paddingLeft: '8px', fontSize: '12px', color: '#6b7280', lineHeight: '1.4' }}>
+                      ⚡ {msg.tokens.total?.toLocaleString()} tokens{msg.model ? ` · ${msg.model}` : ''}
+                    </div>
+                  )}
                 </div>
               </motion.div>
             ))}

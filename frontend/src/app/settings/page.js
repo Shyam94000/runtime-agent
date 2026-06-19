@@ -227,10 +227,10 @@ export default function SettingsPage() {
             {/* Network Latency Threshold */}
             <div className="form-group">
               <label className="form-label" htmlFor="net-threshold">
-                Network API Latency Threshold (ms)
+                Slow API Response Threshold (ms)
               </label>
               <p className="form-hint">
-                Alert when downstream Network API calls take longer than this threshold
+                Alert when downstream API calls take longer than this threshold
               </p>
               <div className="form-slider-group">
                 <input

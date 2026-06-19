@@ -3,7 +3,7 @@
 import { useState, useEffect } from 'react';
 import { useParams } from 'next/navigation';
 import Link from 'next/link';
-import { getDiagnostic } from '@/lib/api';
+import { getDiagnostic, getTrace } from '@/lib/api';
 import CodeDiff from '@/components/CodeDiff';
 
 export default function DiagnosticDetailPage() {
@@ -11,6 +11,7 @@ export default function DiagnosticDetailPage() {
   const [report, setReport] = useState(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
+  const [traceData, setTraceData] = useState(null);
 
   useEffect(() => {
     let intervalId = null;
@@ -73,6 +74,14 @@ export default function DiagnosticDetailPage() {
       ws.close();
     };
   }, [params.id]);
+
+  useEffect(() => {
+    if (report?.agent_trace_id && !traceData) {
+      getTrace(report.agent_trace_id)
+        .then(data => setTraceData(data))
+        .catch(err => console.error('Failed to fetch trace data:', err));
+    }
+  }, [report?.agent_trace_id, traceData]);
 
   if (loading) {
     return (
@@ -231,6 +240,20 @@ export default function DiagnosticDetailPage() {
                 </div>
               );
             })}
+          </div>
+          <div className="flex gap-8 mt-4 pt-4 border-t border-gray-100">
+            <div>
+              <div className="text-xs var(--text-tertiary) mb-1 uppercase tracking-wider">Model Used</div>
+              <div className="text-sm font-medium">{report.model_used || "unknown"}</div>
+            </div>
+            <div>
+              <div className="text-xs var(--text-tertiary) mb-1 uppercase tracking-wider">Total Tokens</div>
+              <div className="text-sm font-medium">{traceData?.total_tokens ? traceData.total_tokens.toLocaleString() : "—"}</div>
+            </div>
+            <div>
+              <div className="text-xs var(--text-tertiary) mb-1 uppercase tracking-wider">Est. Cost</div>
+              <div className="text-sm font-medium">{traceData?.estimated_cost_usd ? "$" + traceData.estimated_cost_usd.toFixed(4) : "—"}</div>
+            </div>
           </div>
         </div>
       )}

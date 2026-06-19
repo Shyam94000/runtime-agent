@@ -235,3 +235,35 @@ export async function triggerDiagnosis(anomalyId) {
 export async function getLogs() {
   return fetchAPI('/api/logs');
 }
+
+// ---------------------------------------------------------------------------
+// Usage / LLM Observability
+// ---------------------------------------------------------------------------
+
+/**
+ * Fetch aggregate token usage and cost statistics.
+ *
+ * @returns {Promise<{
+ *   total_input_tokens: number,
+ *   total_output_tokens: number,
+ *   total_tokens: number,
+ *   estimated_cost_usd: number
+ * }>}
+ */
+export async function getUsageStats() {
+  return fetchAPI('/api/usage');
+}
+
+// ---------------------------------------------------------------------------
+// Traces
+// ---------------------------------------------------------------------------
+
+/**
+ * Fetch a single agent trace by ID.
+ *
+ * @param {string} traceId - The agent trace identifier.
+ * @returns {Promise<object>}
+ */
+export async function getTrace(traceId) {
+  return fetchAPI(`/api/traces/${encodeURIComponent(traceId)}`);
+}

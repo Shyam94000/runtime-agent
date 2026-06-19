@@ -101,20 +101,21 @@ global.errorTracker = {
 // Must be registered BEFORE route handlers to capture all requests.
 app.use((req, res, next) => {
   const start = process.hrtime.bigint();
+  const requestPath = (req.originalUrl || req.url).split('?')[0];
 
   res.on('finish', () => {
     const durationMs = Number(process.hrtime.bigint() - start) / 1e6;
 
     // Track latency for completed requests (exclude metrics, profile, and heap-snapshot endpoints)
-    if (req.path !== '/api/metrics' && req.path !== '/api/profile' && req.path !== '/api/heap-snapshot') {
+    if (requestPath !== '/api/metrics' && requestPath !== '/api/profile' && requestPath !== '/api/heap-snapshot') {
       latencyWindow.push(durationMs);
       if (latencyWindow.length > MAX_LATENCY_SAMPLES) latencyWindow.shift();
     }
 
-    if (req.path !== '/api/metrics') {
+    if (requestPath !== '/api/metrics') {
       requestLogs.push({
         method: req.method,
-        path: req.path,
+        path: requestPath,
         statusCode: res.statusCode,
         timestamp: new Date().toISOString(),
         duration_ms: parseFloat(durationMs.toFixed(3)),
@@ -215,52 +216,210 @@ app.get('/', (req, res) => {
       <meta charset="UTF-8">
       <meta name="viewport" content="width=device-width, initial-scale=1.0">
       <title>Target App - Bug Simulator</title>
+      <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;800&display=swap" rel="stylesheet">
       <style>
-        body { font-family: system-ui, sans-serif; background: #0d1117; color: #e6edf3; padding: 2rem; max-width: 600px; margin: auto; }
-        button { background: #58a6ff; color: white; border: none; padding: 10px 16px; border-radius: 6px; cursor: pointer; font-size: 1rem; margin-right: 10px; margin-bottom: 10px; }
-        button:hover { background: #3182ce; }
-        .memory-btn { background: #d29922; }
-        .memory-btn:hover { background: #b7791f; }
-        .danger-btn { background: #e53e3e; }
-        .danger-btn:hover { background: #c53030; }
-        .error-btn { background: #f56565; }
-        .error-btn:hover { background: #e53e3e; }
-        .rejection-btn { background: #9f7aea; }
-        .rejection-btn:hover { background: #805ad5; }
-        pre { background: #161b22; padding: 1rem; border-radius: 6px; border: 1px solid #30363d; overflow-x: auto; font-size: 0.85rem; }
-        h3 { color: #8b949e; margin-top: 1.5rem; margin-bottom: 0.5rem; font-size: 0.9rem; text-transform: uppercase; letter-spacing: 0.05em; }
+        :root {
+          --bg-color: #0b0f19;
+          --card-bg: rgba(255, 255, 255, 0.05);
+          --card-border: rgba(255, 255, 255, 0.1);
+          --text-main: #f1f5f9;
+          --text-muted: #94a3b8;
+          --accent-blue: #3b82f6;
+          --accent-purple: #8b5cf6;
+          --accent-orange: #f59e0b;
+          --accent-red: #ef4444;
+        }
+        body {
+          font-family: 'Inter', sans-serif;
+          background: var(--bg-color);
+          background-image: radial-gradient(circle at top right, rgba(59, 130, 246, 0.15), transparent 40%),
+                            radial-gradient(circle at bottom left, rgba(139, 92, 246, 0.15), transparent 40%);
+          color: var(--text-main);
+          margin: 0;
+          padding: 3rem 1rem;
+          min-height: 100vh;
+          display: flex;
+          justify-content: center;
+        }
+        .container {
+          max-width: 900px;
+          width: 100%;
+        }
+        h2 {
+          font-size: 2.5rem;
+          font-weight: 800;
+          margin-bottom: 0.5rem;
+          background: linear-gradient(to right, #60a5fa, #c084fc);
+          -webkit-background-clip: text;
+          -webkit-text-fill-color: transparent;
+        }
+        p.subtitle {
+          color: var(--text-muted);
+          font-size: 1.1rem;
+          margin-bottom: 3rem;
+        }
+        .grid {
+          display: grid;
+          grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+          gap: 1.5rem;
+          margin-bottom: 3rem;
+        }
+        .category-card {
+          background: var(--card-bg);
+          border: 1px solid var(--card-border);
+          border-radius: 16px;
+          padding: 1.5rem;
+          backdrop-filter: blur(12px);
+          -webkit-backdrop-filter: blur(12px);
+          box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1), 0 2px 4px -1px rgba(0, 0, 0, 0.06);
+          transition: transform 0.3s ease, box-shadow 0.3s ease;
+        }
+        .category-card:hover {
+          transform: translateY(-5px);
+          box-shadow: 0 20px 25px -5px rgba(0, 0, 0, 0.1), 0 10px 10px -5px rgba(0, 0, 0, 0.04);
+        }
+        .category-title {
+          font-size: 1.2rem;
+          font-weight: 600;
+          margin-bottom: 1.5rem;
+          display: flex;
+          align-items: center;
+          gap: 0.5rem;
+        }
+        .btn {
+          display: block;
+          width: 100%;
+          padding: 0.75rem 1rem;
+          border-radius: 8px;
+          border: none;
+          font-size: 0.95rem;
+          font-weight: 600;
+          font-family: 'Inter', sans-serif;
+          cursor: pointer;
+          margin-bottom: 0.75rem;
+          color: white;
+          transition: all 0.2s ease;
+          position: relative;
+          overflow: hidden;
+        }
+        .btn::after {
+          content: '';
+          position: absolute;
+          top: 0; left: 0; right: 0; bottom: 0;
+          background: linear-gradient(rgba(255,255,255,0.1), transparent);
+          opacity: 0;
+          transition: opacity 0.2s ease;
+        }
+        .btn:hover::after { opacity: 1; }
+        .btn:active { transform: scale(0.98); }
+        .btn:last-child { margin-bottom: 0; }
+        
+        .btn-blue { background: var(--accent-blue); box-shadow: 0 4px 14px 0 rgba(59, 130, 246, 0.39); }
+        .btn-orange { background: var(--accent-orange); box-shadow: 0 4px 14px 0 rgba(245, 158, 11, 0.39); }
+        .btn-purple { background: var(--accent-purple); box-shadow: 0 4px 14px 0 rgba(139, 92, 246, 0.39); }
+        .btn-red { background: var(--accent-red); box-shadow: 0 4px 14px 0 rgba(239, 68, 68, 0.39); }
+
+        .output-panel {
+          background: #0f172a;
+          border: 1px solid #1e293b;
+          border-radius: 12px;
+          padding: 1.5rem;
+          box-shadow: inset 0 2px 4px 0 rgba(0, 0, 0, 0.06);
+        }
+        .output-panel h4 {
+          margin: 0 0 1rem 0;
+          color: var(--text-muted);
+          font-size: 0.9rem;
+          text-transform: uppercase;
+          letter-spacing: 0.05em;
+        }
+        pre {
+          margin: 0;
+          font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+          font-size: 0.85rem;
+          color: #a5b4fc;
+          white-space: pre-wrap;
+          word-wrap: break-word;
+        }
+        .loader {
+          display: inline-block;
+          width: 1rem;
+          height: 1rem;
+          border: 2px solid rgba(255,255,255,0.3);
+          border-radius: 50%;
+          border-top-color: white;
+          animation: spin 1s ease-in-out infinite;
+          margin-right: 0.5rem;
+          vertical-align: middle;
+          display: none;
+        }
+        @keyframes spin { to { transform: rotate(360deg); } }
       </style>
     </head>
     <body>
-      <h2>Bug Simulator</h2>
-      <p>Click the buttons below to trigger intentional performance issues.</p>
-      
-      <h3>Original Simulations</h3>
-      <button onclick="trigger('/api/cpu-heavy')">Simulate CPU Spike (O(2^n))</button>
-      <button class="memory-btn" onclick="trigger('/api/memory-leak?amount=15')">Simulate Memory Leak (15MB)</button>
-      
-      <h3>New Metric Simulations</h3>
-      <button class="danger-btn" onclick="trigger('/api/event-loop-block?duration=500')">Block Event Loop (500ms)</button>
-      <button class="error-btn" onclick="trigger('/api/error-burst?count=35')">Trigger Error Burst (35 Errors)</button>
-      <button class="rejection-btn" onclick="trigger('/api/unhandled-rejection')">Trigger Unhandled Rejection</button>
-      <button class="memory-btn" onclick="trigger('/api/db-degradation?duration=3000')">Simulate DB Degradation (3s)</button>
-      <button class="danger-btn" onclick="trigger('/api/network-delay?duration=4000')">Simulate Network Delay (4s)</button>
-      
-      <div style="margin-top: 1.5rem;">
-        <h4>Last Response:</h4>
-        <pre id="output">No action taken yet.</pre>
+      <div class="container">
+        <h2>Target App Diagnostics</h2>
+        <p class="subtitle">Select a scenario below to inject intentional performance issues or errors into the Node.js runtime.</p>
+        
+        <div class="grid">
+          <!-- Category 1 -->
+          <div class="category-card">
+            <div class="category-title" style="color: var(--accent-blue);">
+              <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="22 12 18 12 15 21 9 3 6 12 2 12"></polyline></svg>
+              Resource Exhaustion
+            </div>
+            <button class="btn btn-blue" onclick="trigger('/api/cpu-heavy', this)">Simulate CPU Spike (O(2^n))</button>
+            <button class="btn btn-orange" onclick="trigger('/api/memory-leak?amount=15', this)">Simulate Memory Leak (15MB)</button>
+          </div>
+
+          <!-- Category 2 -->
+          <div class="category-card">
+            <div class="category-title" style="color: var(--accent-purple);">
+              <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"></circle><polyline points="12 6 12 12 16 14"></polyline></svg>
+              Latency & Blocking
+            </div>
+            <button class="btn btn-red" onclick="trigger('/api/event-loop-block?duration=500', this)">Block Event Loop (500ms)</button>
+            <button class="btn btn-purple" onclick="trigger('/api/db-degradation?duration=3000', this)">Simulate DB Degradation (3s)</button>
+            <button class="btn btn-purple" onclick="trigger('/api/network-delay?duration=4000', this)">Simulate Slow API Response (4s)</button>
+          </div>
+
+          <!-- Category 3 -->
+          <div class="category-card">
+            <div class="category-title" style="color: var(--accent-red);">
+              <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"></path><line x1="12" y1="9" x2="12" y2="13"></line><line x1="12" y1="17" x2="12.01" y2="17"></line></svg>
+              Errors & Crashes
+            </div>
+            <button class="btn btn-red" onclick="trigger('/api/unhandled-rejection', this)">Trigger Unhandled Rejection</button>
+          </div>
+        </div>
+        
+        <div class="output-panel">
+          <h4>Execution Output</h4>
+          <pre id="output"><span style="color: #64748b;">Ready. Waiting for scenario execution...</span></pre>
+        </div>
       </div>
 
       <script>
-        async function trigger(endpoint) {
+        async function trigger(endpoint, btn) {
           const out = document.getElementById('output');
-          out.innerText = 'Requesting ' + endpoint + '...';
+          const originalText = btn.innerText;
+          
+          btn.innerHTML = '<span class="loader" style="display:inline-block;"></span> Running...';
+          btn.style.opacity = '0.8';
+          btn.style.pointerEvents = 'none';
+          
+          out.innerHTML = '<span style="color: #94a3b8;">Requesting ' + endpoint + '...</span>';
+          
           try {
             const res = await fetch(endpoint);
             const json = await res.json();
             out.innerText = JSON.stringify(json, null, 2);
           } catch (e) {
-            out.innerText = 'Error: ' + e.message;
+            out.innerHTML = '<span style="color: #ef4444;">Error: ' + e.message + '</span>';
+          } finally {
+            btn.innerHTML = originalText;
+            btn.style.opacity = '1';
+            btn.style.pointerEvents = 'auto';
           }
         }
       </script>
