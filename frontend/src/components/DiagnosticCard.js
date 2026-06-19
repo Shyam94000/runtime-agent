@@ -2,57 +2,21 @@
 
 import React from 'react';
 import { useRouter } from 'next/navigation';
-
-/**
- * Severity-to-colour mapping used for the left-border accent
- * and the badge background tint.
- */
-const SEVERITY_COLORS = {
-  critical: '#f85149',
-  high: '#e3b341',
-  warning: '#d29922',
-  info: '#58a6ff',
-};
+import { AlertTriangle, AlertCircle, Info, ShieldAlert } from 'lucide-react';
 
 /**
  * Compact SVG icons keyed by severity for the meta row.
- * Each returns an inline SVG element sized at 14×14.
  */
 function SeverityIcon({ severity }) {
-  const color = SEVERITY_COLORS[severity] || SEVERITY_COLORS.info;
   switch (severity) {
     case 'critical':
-      return (
-        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke={color} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-          <polygon points="7.86 2 16.14 2 22 7.86 22 16.14 16.14 22 7.86 22 2 16.14 2 7.86 7.86 2" />
-          <line x1="12" y1="8" x2="12" y2="12" />
-          <line x1="12" y1="16" x2="12.01" y2="16" />
-        </svg>
-      );
+      return <ShieldAlert size={14} strokeWidth={2} />;
     case 'high':
-      return (
-        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke={color} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-          <path d="M10.29 3.86L1.82 18a2 2 0 001.71 3h16.94a2 2 0 001.71-3L13.71 3.86a2 2 0 00-3.42 0z" />
-          <line x1="12" y1="9" x2="12" y2="13" />
-          <line x1="12" y1="17" x2="12.01" y2="17" />
-        </svg>
-      );
+      return <AlertTriangle size={14} strokeWidth={2} />;
     case 'warning':
-      return (
-        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke={color} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-          <circle cx="12" cy="12" r="10" />
-          <line x1="12" y1="8" x2="12" y2="12" />
-          <line x1="12" y1="16" x2="12.01" y2="16" />
-        </svg>
-      );
+      return <AlertCircle size={14} strokeWidth={2} />;
     default:
-      return (
-        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke={color} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-          <circle cx="12" cy="12" r="10" />
-          <line x1="12" y1="16" x2="12" y2="12" />
-          <line x1="12" y1="8" x2="12.01" y2="8" />
-        </svg>
-      );
+      return <Info size={14} strokeWidth={2} />;
   }
 }
 
@@ -116,7 +80,6 @@ export default function DiagnosticCard({ diagnostic, href, onClick }) {
     confidence_score = 0,
   } = diagnostic;
 
-  const accentColor = SEVERITY_COLORS[severity] || SEVERITY_COLORS.info;
   const confidencePercent = Math.min(Math.max(Math.round(confidence_score * 100), 0), 100);
 
   /* Build file:line reference string */
@@ -139,9 +102,9 @@ export default function DiagnosticCard({ diagnostic, href, onClick }) {
 
   return (
     <div
-      className="diagnostic-card animate-slide-up"
+      className={`diagnostic-card animate-slide-up ${severity}`}
       onClick={interactive ? openCard : undefined}
-      style={{ borderLeftColor: accentColor, cursor: interactive ? 'pointer' : 'default' }}
+      style={{ cursor: interactive ? 'pointer' : 'default' }}
       role={interactive ? 'link' : undefined}
       tabIndex={interactive ? 0 : undefined}
       onKeyDown={(e) => {
