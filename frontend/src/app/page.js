@@ -3,6 +3,7 @@
 import { useState, useEffect, useCallback } from 'react';
 import Link from 'next/link';
 import MetricChart from '@/components/MetricChart';
+import LatencyChart from '@/components/LatencyChart';
 import DiagnosticCard from '@/components/DiagnosticCard';
 import {
   getMetrics,
@@ -272,6 +273,10 @@ export default function DashboardPage() {
           data={metricsHistory}
           thresholds={{ cpu: thresholds.cpu_threshold }}
         />
+        <div style={{ display: 'flex', gap: '24px', marginTop: '24px', flexWrap: 'wrap' }}>
+          <LatencyChart data={metricsHistory} dataKey="db_p95_ms" title="DB Latency (p95 ms)" lineType="solid" />
+          <LatencyChart data={metricsHistory} dataKey="network_p95_ms" title="API Response (p95 ms)" lineType="dashed" />
+        </div>
       </div>
 
       {/* Bottom Section: Anomalies + Latest Diagnostic */}
@@ -454,7 +459,6 @@ function getAnomalyTitle(type) {
     case 'memory': return 'Memory Growth';
     case 'event_loop': return 'Event Loop Block';
     case 'latency': return 'High Latency';
-    case 'error_rate': return 'Error Burst';
     case 'db_latency': return 'DB Degradation';
     case 'network_latency': return 'Slow API Response';
     case 'runtime_error': return 'Runtime Error';

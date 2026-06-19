@@ -237,7 +237,6 @@ class RuntimeMonitor:
     async def _detect_anomaly(self, snapshot: RawMetricSnapshot) -> AnomalyEvent | None:
         detector_results = [
             self._detect_runtime_error(snapshot),
-            self._detect_error_burst(snapshot),
             self._detect_event_loop_block(snapshot),
             self._detect_db_degradation(snapshot),
             self._detect_network_delay(snapshot),
@@ -278,26 +277,6 @@ class RuntimeMonitor:
             f"{latest.type} captured: {latest.message}",
         )
 
-    def _detect_error_burst(self, snapshot: RawMetricSnapshot) -> tuple[AnomalyType, float, float, str, str] | None:
-        recent_errors = self._recent_error_count(snapshot, seconds=60)
-        route_errors = self._recent_error_count(snapshot, seconds=20, path="/api/error-burst")
-        active = (
-            route_errors >= 1
-            or recent_errors >= 10
-            or snapshot.error_rate.rate_per_second > self.config.error_rate_threshold
-        )
-        self._set_streak(AnomalyType.error_rate, active)
-        if not active or self._detector_streaks[AnomalyType.error_rate] != 1:
-            return None
-        val = max(snapshot.error_rate.rate_per_second, recent_errors / 60)
-        sev = "critical" if recent_errors >= 30 or val > 5.0 else ("high" if recent_errors >= 10 or val > 2.0 else "medium")
-        return (
-            AnomalyType.error_rate,
-            val,
-            self.config.error_rate_threshold,
-            sev,
-            f"{recent_errors} recent 5xx errors detected in the last 60s.",
-        )
 
     def _detect_event_loop_block(self, snapshot: RawMetricSnapshot) -> tuple[AnomalyType, float, float, str, str] | None:
         val = max(snapshot.event_loop.lag_p99_ms, snapshot.event_loop.lag_max_ms)

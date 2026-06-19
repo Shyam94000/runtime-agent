@@ -16,7 +16,6 @@ const cpuHeavyRoute = require('./routes/cpu-heavy');
 const memoryLeakRoute = require('./routes/memory-leak');
 const healthyRoute = require('./routes/healthy');
 const eventLoopBlockRoute = require('./routes/event-loop-block');
-const errorBurstRoute = require('./routes/error-burst');
 const unhandledRejectionRoute = require('./routes/unhandled-rejection');
 const dbDegradationRoute = require('./routes/db-degradation');
 const networkDelayRoute = require('./routes/network-delay');
@@ -89,13 +88,7 @@ function computePercentile(sortedArr, pct) {
   return parseFloat(sortedArr[Math.max(0, idx)].toFixed(3));
 }
 
-// ── Error Rate Tracking ────────────────────────────────────────
-// Counts 5xx responses in a rolling 60-second window.
-global.errorTracker = {
-  total: 0,
-  timestamps: [],   // rolling 60s window of error timestamps
-  recentErrors: [],  // last 20 error details
-};
+
 
 // Combined latency + error tracking middleware
 // Must be registered BEFORE route handlers to capture all requests.
@@ -123,25 +116,7 @@ app.use((req, res, next) => {
       if (requestLogs.length > MAX_REQUEST_LOGS) requestLogs.shift();
     }
 
-    // Track 5xx errors
-    if (res.statusCode >= 500) {
-      const now = Date.now();
-      global.errorTracker.total++;
-      global.errorTracker.timestamps.push(now);
-      global.errorTracker.recentErrors.push({
-        statusCode: res.statusCode,
-        path: req.path,
-        method: req.method,
-        timestamp: now,
-      });
-      // Trim to 60s window
-      const cutoff = now - 60000;
-      global.errorTracker.timestamps = global.errorTracker.timestamps.filter((t) => t > cutoff);
-      // Keep only last 20 error details
-      if (global.errorTracker.recentErrors.length > 20) {
-        global.errorTracker.recentErrors = global.errorTracker.recentErrors.slice(-20);
-      }
-    }
+
   });
 
   next();
@@ -202,7 +177,6 @@ app.use('/api/cpu-heavy', cpuHeavyRoute);
 app.use('/api/memory-leak', memoryLeakRoute);
 app.use('/api/healthy', healthyRoute);
 app.use('/api/event-loop-block', eventLoopBlockRoute);
-app.use('/api/error-burst', errorBurstRoute);
 app.use('/api/unhandled-rejection', unhandledRejectionRoute);
 app.use('/api/db-degradation', dbDegradationRoute);
 app.use('/api/network-delay', networkDelayRoute);
@@ -458,11 +432,7 @@ function generateMetricsPayload() {
       ? latencyWindow.reduce((sum, v) => sum + v, 0) / latencyWindow.length
       : 0;
 
-  // Compute current error rate (errors in last 60s / 60)
-  const now = Date.now();
-  const cutoff = now - 60000;
-  const recentErrorTimestamps = global.errorTracker.timestamps.filter((t) => t > cutoff);
-  const errorRatePerSecond = recentErrorTimestamps.length / 60;
+
 
   // DB and Network Latency averages
   const sortedDb = [...global.dbLatencyWindow].sort((a, b) => a - b);
@@ -499,12 +469,6 @@ function generateMetricsPayload() {
       sample_size: latencyWindow.length,
       db_p95_ms: computePercentile(sortedDb, 95),
       network_p95_ms: computePercentile(sortedNet, 95),
-    },
-    error_rate: {
-      total_5xx: global.errorTracker.total,
-      rate_per_second: parseFloat(errorRatePerSecond.toFixed(3)),
-      recent_errors: global.errorTracker.recentErrors.slice(-20),
-    },
     uncaught_errors: uncaughtErrors.slice(-20),
     uptime: parseFloat(process.uptime().toFixed(2)),
     active_requests: activeRequestList.length,
@@ -577,7 +541,6 @@ const server = app.listen(PORT, () => {
   console.log(`   GET /api/cpu-heavy            — Triggers CPU spike (fibonacci)`);
   console.log(`   GET /api/memory-leak          — Leaks ~1 MB per call`);
   console.log(`   GET /api/event-loop-block     — Blocks event loop (sync while loop)`);
-  console.log(`   GET /api/error-burst          — Returns 500 error responses`);
   console.log(`   GET /api/unhandled-rejection  — Triggers unhandled Promise rejection`);
   console.log(`   GET /api/metrics              — Live process metrics`);
   console.log(`   GET /api/profile              — V8 CPU profiler (3s)`);

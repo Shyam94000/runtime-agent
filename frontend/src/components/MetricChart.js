@@ -38,8 +38,6 @@ export default function MetricChart({ data = [], thresholds }) {
     const timestamps = data.map((d) => formatTime(d.timestamp));
     const cpuValues = data.map((d) => d.cpu_percent ?? 0);
     const memValues = data.map((d) => d.memory_mb ?? 0);
-    const dbValues = data.map((d) => d.db_p95_ms ?? 0);
-    const netValues = data.map((d) => d.network_p95_ms ?? 0);
 
     /* ---------- no cpu markline anymore ---------- */
     
@@ -74,9 +72,7 @@ export default function MetricChart({ data = [], thresholds }) {
         itemHeight: 2,
         data: [
           { name: 'CPU %', icon: 'path://M0,0 L20,0' },
-          { name: 'Memory MB', icon: 'path://M0,0 L10,0 M15,0 L20,0' },
-          { name: 'DB p95', icon: 'path://M0,0 L20,0' },
-          { name: 'Net p95', icon: 'path://M0,0 L10,0 M15,0 L20,0' }
+          { name: 'Memory MB', icon: 'path://M0,0 L10,0 M15,0 L20,0' }
         ]
       },
 
@@ -102,36 +98,20 @@ export default function MetricChart({ data = [], thresholds }) {
       },
 
       /* ---- Y axis ---- */
-      yAxis: [
-        {
-          type: 'value',
-          name: 'CPU / Mem',
-          nameTextStyle: { color: '#000000', fontSize: 10, align: 'left', padding: [0, 20, 0, 0] },
-          axisLine: { show: true, lineStyle: { color: '#000000', width: 1 } },
-          axisTick: { show: true, lineStyle: { color: '#000000' } },
-          axisLabel: { color: '#000000', fontSize: 10, fontFamily: 'var(--font-sans)' },
-          splitLine: { show: false },
-          axisPointer: { label: { show: false } },
-        },
-        {
-          type: 'value',
-          name: 'Latency (ms)',
-          nameTextStyle: { color: '#000000', fontSize: 10, align: 'right', padding: [0, 0, 0, 20] },
-          position: 'right',
-          axisLine: { show: true, lineStyle: { color: '#000000', width: 1 } },
-          axisTick: { show: true, lineStyle: { color: '#000000' } },
-          axisLabel: { color: '#000000', fontSize: 10, fontFamily: 'var(--font-sans)' },
-          splitLine: { show: false },
-          axisPointer: { label: { show: false } },
-        }
-      ],
+      yAxis: {
+        type: 'value',
+        axisLine: { show: true, lineStyle: { color: '#000000', width: 1 } },
+        axisTick: { show: true, lineStyle: { color: '#000000' } },
+        axisLabel: { color: '#000000', fontSize: 10, fontFamily: 'var(--font-sans)' },
+        splitLine: { show: false },
+        axisPointer: { label: { show: false } },
+      },
 
       /* ---- series ---- */
       series: [
         {
           name: 'CPU %',
           type: 'line',
-          yAxisIndex: 0,
           smooth: false,
           symbol: 'none',
           label: { show: false },
@@ -143,37 +123,12 @@ export default function MetricChart({ data = [], thresholds }) {
         {
           name: 'Memory MB',
           type: 'line',
-          yAxisIndex: 0,
           smooth: false,
           symbol: 'none',
           label: { show: false },
           data: memValues,
           lineStyle: { color: '#000000', width: 2, type: 'dashed' },
           itemStyle: { color: '#000000' },
-          emphasis: { label: { show: false } },
-        },
-        {
-          name: 'DB p95',
-          type: 'line',
-          yAxisIndex: 1,
-          smooth: false,
-          symbol: 'none',
-          label: { show: false },
-          data: dbValues,
-          lineStyle: { color: '#ef4444', width: 1, type: 'solid' },
-          itemStyle: { color: '#ef4444' },
-          emphasis: { label: { show: false } },
-        },
-        {
-          name: 'Net p95',
-          type: 'line',
-          yAxisIndex: 1,
-          smooth: false,
-          symbol: 'none',
-          label: { show: false },
-          data: netValues,
-          lineStyle: { color: '#3b82f6', width: 1, type: 'dashed' },
-          itemStyle: { color: '#3b82f6' },
           emphasis: { label: { show: false } },
         },
       ],

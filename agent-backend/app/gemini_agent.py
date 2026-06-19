@@ -9,8 +9,6 @@ from app.models import AnomalyEvent, DiagnosticReport, MetricPoint, SourceContex
 from app.prompts import (
     AGENT_SYSTEM_PROMPT,
     INITIAL_ANOMALY_PROMPT,
-    SINGLE_CALL_DIAGNOSIS_PROMPT,
-    SINGLE_CALL_DIAGNOSIS_SYSTEM_PROMPT,
 )
 from app.agent_tools import create_tools
 from pydantic import BaseModel, Field
@@ -82,23 +80,10 @@ class AgenticDiagnosticAgent:
                 full_context=full_context,
             )
 
-            if getattr(settings, "diagnosis_mode", "single_call") == "agent_loop":
-                report = await asyncio.wait_for(
-                    asyncio.to_thread(self._run_agent_loop, anomaly, initial_prompt, trace, source_context),
-                    timeout=getattr(settings, 'agent_timeout_seconds', 120),
-                )
-            else:
-                report = await asyncio.wait_for(
-                    asyncio.to_thread(
-                        self._run_single_call_diagnosis,
-                        anomaly,
-                        metrics_context,
-                        full_context,
-                        trace,
-                        source_context,
-                    ),
-                    timeout=getattr(settings, 'agent_timeout_seconds', 120),
-                )
+            report = await asyncio.wait_for(
+                asyncio.to_thread(self._run_agent_loop, anomaly, initial_prompt, trace, source_context),
+                timeout=getattr(settings, 'agent_timeout_seconds', 120),
+            )
             report.agent_trace_id = trace.id
             return report, trace
         except Exception as e:
@@ -116,79 +101,7 @@ class AgenticDiagnosticAgent:
             report.agent_trace_id = trace.id
             return report, trace
 
-    def _run_single_call_diagnosis(
-        self,
-        anomaly: AnomalyEvent,
-        metrics_context: list[MetricPoint],
-        full_context: str,
-        trace: AgentTrace,
-        source_context: SourceContext | None,
-    ) -> DiagnosticReport:
-        source = source_context.source_code if source_context else "No source context found."
-        prompt = SINGLE_CALL_DIAGNOSIS_PROMPT.format(
-            anomaly_id=anomaly.id,
-            anomaly_type=anomaly.type.value,
-            current_value=round(anomaly.current_value, 2),
-            threshold=round(anomaly.threshold, 2),
-            severity=anomaly.severity,
-            details=anomaly.details,
-            metrics_context=json.dumps([m.model_dump(mode="json") for m in metrics_context[-20:]], indent=2),
-            call_stack=json.dumps(anomaly.call_stack, indent=2),
-            file_path=source_context.relative_file_path if source_context else "unknown",
-            line_range=f"{source_context.start_line}-{source_context.end_line}" if source_context else "unknown",
-            source_code=source,
-            full_context=full_context,
-        )
 
-        start_time = time.time()
-        response = router.generate(
-            messages=[{"role": "user", "content": prompt}],
-            tools=None,
-            system_prompt=SINGLE_CALL_DIAGNOSIS_SYSTEM_PROMPT,
-            anomaly_id=anomaly.id,
-            response_schema=DiagnosticResponseSchema
-        )
-        actual_model = f"{response.provider_name}/{response.model_name}"
-        trace.model_used = actual_model
-        
-        try:
-            payload = json.loads(response.text or "{}")
-        except json.JSONDecodeError:
-            payload = {}
-
-        trace.status = "completed"
-        trace.completed_at = utc_now()
-        trace.steps.append(AgentStep(
-            step_number=1,
-            type="conclusion",
-            reasoning=str(payload.get("root_cause_summary") or "Single-call diagnosis completed."),
-            duration_ms=(time.time() - start_time) * 1000,
-            input_tokens=response.input_tokens,
-            output_tokens=response.output_tokens,
-        ))
-        trace.total_steps = len(trace.steps)
-        trace.total_input_tokens = response.input_tokens
-        trace.total_output_tokens = response.output_tokens
-        trace.total_tokens = response.total_tokens
-        trace.estimated_cost_usd = estimate_cost(response.model_name, response.input_tokens, response.output_tokens)
-
-        return DiagnosticReport(
-            anomaly_id=anomaly.id,
-            severity=anomaly.severity,
-            agent_trace_id=trace.id,
-            investigation_steps=1,
-            tools_used=[],
-            model_used=actual_model,
-            root_cause_summary=str(payload.get("root_cause_summary") or "Anomaly detected"),
-            root_cause_function=str(payload.get("root_cause_function") or ""),
-            root_cause_file=str(payload.get("root_cause_file") or (source_context.relative_file_path if source_context else "")),
-            root_cause_lines=str(payload.get("root_cause_lines") or ""),
-            explanation=str(payload.get("explanation") or ""),
-            suggested_fix=str(payload.get("suggested_fix") or ""),
-            fix_justification=str(payload.get("fix_justification") or ""),
-            confidence_score=float(payload.get("confidence_score") or 0.75),
-            source_code_context=source if source_context else "",
-        )
 
     def _run_agent_loop(
         self,

@@ -15,7 +15,6 @@ class AnomalyType(str, Enum):
     memory = "memory"
     event_loop = "event_loop"
     latency = "latency"
-    error_rate = "error_rate"
     db_latency = "db_latency"
     network_latency = "network_latency"
     runtime_error = "runtime_error"
@@ -55,12 +54,6 @@ class ResponseLatencyMetrics(BaseModel):
     network_p95_ms: float = 0.0
 
 
-class ErrorRateMetrics(BaseModel):
-    total_5xx: int = 0
-    rate_per_second: float = 0.0
-    recent_errors: list[dict] = Field(default_factory=list)
-
-
 class UncaughtError(BaseModel):
     type: str = ""
     message: str = ""
@@ -87,7 +80,6 @@ class RawMetricSnapshot(BaseModel):
     node_version: str | None = None
     event_loop: EventLoopMetrics = Field(default_factory=EventLoopMetrics)
     response_latency: ResponseLatencyMetrics = Field(default_factory=ResponseLatencyMetrics)
-    error_rate: ErrorRateMetrics = Field(default_factory=ErrorRateMetrics)
     uncaught_errors: list[UncaughtError] = Field(default_factory=list)
     request_logs: list[dict] = Field(default_factory=list)
 

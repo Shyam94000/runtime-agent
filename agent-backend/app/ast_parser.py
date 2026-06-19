@@ -45,7 +45,6 @@ class JavaScriptSourceFinder:
             "cpu": ["fibonacci"],
             "memory": ["addToCache", "getCacheSize"],
             "event_loop": ["event-loop-block"],
-            "error_rate": ["error-burst"],
             "db_latency": ["db-degradation"],
             "network_latency": ["network-delay"],
             "runtime_error": ["unhandled-rejection"],
@@ -63,7 +62,6 @@ class JavaScriptSourceFinder:
     def find_route_file(self, anomaly_type: str) -> SourceContext | None:
         route_by_type = {
             "event_loop": "event-loop-block.js",
-            "error_rate": "error-burst.js",
             "db_latency": "db-degradation.js",
             "network_latency": "network-delay.js",
             "runtime_error": "unhandled-rejection.js",
