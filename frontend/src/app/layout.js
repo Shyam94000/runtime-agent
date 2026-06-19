@@ -1,4 +1,4 @@
-import { Inter, JetBrains_Mono } from 'next/font/google';
+import { Inter, Cormorant_Garamond } from 'next/font/google';
 import './globals.css';
 import Sidebar from '@/components/Sidebar';
 
@@ -8,10 +8,10 @@ const inter = Inter({
   variable: '--font-inter',
 });
 
-const jetbrainsMono = JetBrains_Mono({
+const cormorant = Cormorant_Garamond({
   subsets: ['latin'],
-  weight: ['400', '500'],
-  variable: '--font-mono',
+  weight: ['400', '500', '600', '700'],
+  variable: '--font-serif',
 });
 
 export const metadata = {
@@ -23,7 +23,7 @@ export const metadata = {
 
 export default function RootLayout({ children }) {
   return (
-    <html lang="en" className={`${inter.variable} ${jetbrainsMono.variable}`}>
+    <html lang="en" className={`${inter.variable} ${cormorant.variable}`}>
       <body>
         <Sidebar />
         <main className="main-content">{children}</main>

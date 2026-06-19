@@ -41,12 +41,48 @@ class JavaScriptSourceFinder:
     def find_best_context(self, call_stack: list[str], anomaly_type: str) -> SourceContext | None:
         candidates = [clean_function_name(frame) for frame in call_stack]
         candidates = [name for name in candidates if name]
-        preferred = ["fibonacci"] if anomaly_type == "cpu" else ["addToCache", "getCacheSize"]
+        preferred_by_type = {
+            "cpu": ["fibonacci"],
+            "memory": ["addToCache", "getCacheSize"],
+            "event_loop": ["event-loop-block"],
+            "error_rate": ["error-burst"],
+            "db_latency": ["db-degradation"],
+            "network_latency": ["network-delay"],
+            "runtime_error": ["unhandled-rejection"],
+        }
+        preferred = preferred_by_type.get(anomaly_type, [])
         for name in preferred + candidates:
             found = self.find_function(name)
             if found:
                 return found
+        route_context = self.find_route_file(anomaly_type)
+        if route_context:
+            return route_context
         return self.first_js_context()
+
+    def find_route_file(self, anomaly_type: str) -> SourceContext | None:
+        route_by_type = {
+            "event_loop": "event-loop-block.js",
+            "error_rate": "error-burst.js",
+            "db_latency": "db-degradation.js",
+            "network_latency": "network-delay.js",
+            "runtime_error": "unhandled-rejection.js",
+        }
+        route_name = route_by_type.get(anomaly_type)
+        if not route_name or not self.source_dir.exists():
+            return None
+        for path in sorted(self.source_dir.rglob(route_name)):
+            text = path.read_text(encoding="utf-8")
+            lines = text.splitlines()
+            return SourceContext(
+                function_name=path.stem,
+                file_path=str(path.resolve()),
+                relative_file_path=str(path.relative_to(self.source_dir.parent)),
+                start_line=1,
+                end_line=len(lines),
+                source_code="\n".join(lines),
+            )
+        return None
 
     def find_function(self, function_name: str) -> SourceContext | None:
         if getattr(self, 'ts_parser', None):

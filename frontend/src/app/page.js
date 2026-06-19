@@ -25,18 +25,21 @@ export default function DashboardPage() {
 
   const fetchData = useCallback(async () => {
     try {
-      const [metricsData, current, anomalyData, diagData, configData, logsData] =
+      const [metricsData, anomalyData, diagData, configData, logsData] =
         await Promise.allSettled([
           getMetrics({ minutes: 30 }),
-          getCurrentMetrics(),
           getAnomalies(),
           getDiagnostics(),
           getConfig(),
           getLogs(),
         ]);
 
-      if (metricsData.status === 'fulfilled') setMetricsHistory(metricsData.value);
-      if (current.status === 'fulfilled') setCurrentMetrics(current.value);
+      if (metricsData.status === 'fulfilled') {
+        setMetricsHistory(metricsData.value);
+        if (metricsData.value.length > 0) {
+          setCurrentMetrics(metricsData.value[metricsData.value.length - 1]);
+        }
+      }
       if (anomalyData.status === 'fulfilled') setAnomalies(anomalyData.value);
       if (diagData.status === 'fulfilled') setDiagnostics(diagData.value);
       if (configData.status === 'fulfilled') setThresholds(configData.value);
@@ -50,15 +53,86 @@ export default function DashboardPage() {
   }, []);
 
   useEffect(() => {
-    fetchData();
-    const interval = setInterval(fetchData, 5000);
-    return () => clearInterval(interval);
+    const initialRefresh = setTimeout(fetchData, 0);
+
+    // Establish WebSocket connection to backend
+    const wsUrl = process.env.NEXT_PUBLIC_WS_URL || 'ws://localhost:8000/api/ws';
+    const ws = new WebSocket(wsUrl);
+
+    ws.onopen = () => {
+      console.log('🔗 Connected to backend WebSocket stream');
+      setError(null);
+    };
+
+    ws.onmessage = (event) => {
+      try {
+        const msg = JSON.parse(event.data);
+        if (msg.type === 'metrics_update') {
+          const point = msg.data;
+          setCurrentMetrics(point);
+          setMetricsHistory((prev) => {
+            const next = [...prev, point];
+            if (next.length > 200) next.shift(); // keep last 200 points locally
+            return next;
+          });
+        } else if (msg.type === 'anomaly_detected') {
+          const anomaly = msg.data;
+          setAnomalies((prev) => [
+            anomaly,
+            ...prev.filter((item) => item.id !== anomaly.id),
+          ]);
+        } else if (msg.type === 'diagnostic_completed') {
+          const diagnostic = msg.data;
+          const anomaly = msg.anomaly;
+          setDiagnostics((prev) => [
+            diagnostic,
+            ...prev.filter((item) => item.id !== diagnostic.id && item.anomaly_id !== diagnostic.anomaly_id),
+          ]);
+          if (anomaly) {
+            setAnomalies((prev) => [
+              anomaly,
+              ...prev.filter((item) => item.id !== anomaly.id),
+            ]);
+          }
+          getLogs().then(setLogs).catch(() => {});
+        }
+      } catch (err) {
+        console.error('Failed to parse WebSocket message:', err);
+      }
+    };
+
+    ws.onerror = () => {
+      setError('WebSocket connection error - backend unreachable');
+    };
+
+    ws.onclose = () => {
+      console.log('❌ WebSocket disconnected');
+    };
+
+    return () => {
+      clearTimeout(initialRefresh);
+      ws.close();
+    };
   }, [fetchData]);
 
   const getCpuStatus = () => {
     if (!currentMetrics) return 'normal';
     if (currentMetrics.cpu_percent > thresholds.cpu_threshold) return 'critical';
     if (currentMetrics.cpu_percent > thresholds.cpu_threshold * 0.8) return 'warning';
+    return 'normal';
+  };
+
+  const getDbStatus = () => {
+    if (!currentMetrics) return 'normal';
+    if (currentMetrics.db_p95_ms > (thresholds.db_latency_threshold_ms || 2000)) return 'critical';
+    if (currentMetrics.db_p95_ms > (thresholds.db_latency_threshold_ms || 2000) * 0.8) return 'warning';
+    return 'normal';
+  };
+
+  const getNetStatus = () => {
+    if (!currentMetrics) return 'normal';
+    if (currentMetrics.network_p95_ms > (thresholds.network_latency_threshold_ms || 3000)) return 'critical';
+    if (currentMetrics.network_p95_ms > (thresholds.network_latency_threshold_ms || 3000) * 0.8) return 'warning';
     return 'normal';
   };
 
@@ -124,14 +198,18 @@ export default function DashboardPage() {
       <div className="grid-3 animate-fade-in" style={{ marginTop: '24px' }}>
         <div className={`metric-card ${getCpuStatus() === 'critical' ? 'metric-card-alert' : ''}`}>
           <div className="metric-card-header">
-            <span className="metric-card-label">CPU Usage</span>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><rect x="4" y="4" width="16" height="16" rx="2"/><rect x="9" y="9" width="6" height="6"/><line x1="9" y1="1" x2="9" y2="4"/><line x1="15" y1="1" x2="15" y2="4"/><line x1="9" y1="20" x2="9" y2="23"/><line x1="15" y1="20" x2="15" y2="23"/><line x1="20" y1="9" x2="23" y2="9"/><line x1="20" y1="14" x2="23" y2="14"/><line x1="1" y1="9" x2="4" y2="9"/><line x1="1" y1="14" x2="4" y2="14"/></svg>
+              <span className="metric-card-label">CPU Usage</span>
+            </div>
             <span className={`status-dot ${getCpuStatus()}`} />
           </div>
           <div className={`metric-card-value metric-value-cpu`}>
             {currentMetrics ? `${currentMetrics.cpu_percent.toFixed(1)}%` : '—'}
           </div>
           <div className="metric-card-footer">
-            <span className="metric-card-threshold">
+            <span className="metric-card-threshold" style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+              <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><circle cx="12" cy="12" r="10"/><circle cx="12" cy="12" r="6"/><circle cx="12" cy="12" r="2"/></svg>
               Threshold: {thresholds.cpu_threshold}%
             </span>
           </div>
@@ -139,14 +217,18 @@ export default function DashboardPage() {
 
         <div className={`metric-card ${getMemStatus() === 'critical' ? 'metric-card-alert' : ''}`}>
           <div className="metric-card-header">
-            <span className="metric-card-label">Memory</span>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><rect x="2" y="2" width="20" height="8" rx="2" ry="2"/><rect x="2" y="14" width="20" height="8" rx="2" ry="2"/><line x1="6" y1="6" x2="6.01" y2="6"/><line x1="6" y1="18" x2="6.01" y2="18"/></svg>
+              <span className="metric-card-label">Memory</span>
+            </div>
             <span className={`status-dot ${getMemStatus()}`} />
           </div>
           <div className="metric-card-value metric-value-memory">
             {currentMetrics ? formatBytes(currentMetrics.memory_mb) : '—'}
           </div>
           <div className="metric-card-footer">
-            <span className="metric-card-threshold">
+            <span className="metric-card-threshold" style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+              <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><rect x="2" y="3" width="20" height="14" rx="2" ry="2"/><line x1="8" y1="21" x2="16" y2="21"/><line x1="12" y1="17" x2="12" y2="21"/></svg>
               Heap: {currentMetrics ? formatBytes(currentMetrics.heap_used_mb) : '—'}
             </span>
           </div>
@@ -154,8 +236,11 @@ export default function DashboardPage() {
 
         <div className="metric-card">
           <div className="metric-card-header">
-            <span className="metric-card-label">Active Requests</span>
-            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="var(--color-warning)" strokeWidth="2">
+            <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg>
+              <span className="metric-card-label">Active Requests</span>
+            </div>
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
               <polyline points="22 12 18 12 15 21 9 3 6 12 2 12" />
             </svg>
           </div>
@@ -163,8 +248,47 @@ export default function DashboardPage() {
             {currentMetrics ? currentMetrics.active_requests : '—'}
           </div>
           <div className="metric-card-footer">
-            <span className="metric-card-threshold">
+            <span className="metric-card-threshold" style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+              <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>
               Uptime: {currentMetrics ? `${Math.floor(currentMetrics.uptime / 60)}m` : '—'}
+            </span>
+          </div>
+        </div>
+      </div>
+
+      <div className="grid-2 animate-fade-in" style={{ marginTop: '24px' }}>
+        <div className={`metric-card ${getDbStatus() === 'critical' ? 'metric-card-alert' : ''}`}>
+          <div className="metric-card-header">
+            <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><ellipse cx="12" cy="5" rx="9" ry="3"/><path d="M21 12c0 1.66-4 3-9 3s-9-1.34-9-3"/><path d="M3 5v14c0 1.66 4 3 9 3s9-1.34 9-3V5"/></svg>
+              <span className="metric-card-label">Database Latency</span>
+            </div>
+            <span className={`status-dot ${getDbStatus()}`} />
+          </div>
+          <div className="metric-card-value">
+            {currentMetrics ? `${currentMetrics.db_p95_ms?.toFixed(1) || 0} ms` : '—'}
+          </div>
+          <div className="metric-card-footer">
+            <span className="metric-card-threshold" style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+              Threshold: {thresholds.db_latency_threshold_ms || 2000} ms
+            </span>
+          </div>
+        </div>
+
+        <div className={`metric-card ${getNetStatus() === 'critical' ? 'metric-card-alert' : ''}`}>
+          <div className="metric-card-header">
+            <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M18 10h-1.26A8 8 0 1 0 9 20h9a5 5 0 0 0 0-10z"/></svg>
+              <span className="metric-card-label">Network API Latency</span>
+            </div>
+            <span className={`status-dot ${getNetStatus()}`} />
+          </div>
+          <div className="metric-card-value">
+            {currentMetrics ? `${currentMetrics.network_p95_ms?.toFixed(1) || 0} ms` : '—'}
+          </div>
+          <div className="metric-card-footer">
+            <span className="metric-card-threshold" style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+              Threshold: {thresholds.network_latency_threshold_ms || 3000} ms
             </span>
           </div>
         </div>
@@ -183,7 +307,10 @@ export default function DashboardPage() {
         {/* Recent Anomalies */}
         <div className="card">
           <div className="card-header">
-            <h2 className="card-title">Recent Anomalies</h2>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+              <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>
+              <h2 className="card-title">Recent Anomalies</h2>
+            </div>
             <span className="badge badge-info">{anomalies.length}</span>
           </div>
           <div className="anomaly-list">
@@ -229,7 +356,10 @@ export default function DashboardPage() {
         {/* Latest Diagnostic */}
         <div className="card">
           <div className="card-header">
-            <h2 className="card-title">Latest AI Diagnosis</h2>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+              <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z"/><polyline points="7.5 4.21 12 6.81 16.5 4.21"/><polyline points="7.5 19.79 7.5 14.6 3 12"/><polyline points="21 12 16.5 14.6 16.5 19.79"/><polyline points="3.27 6.96 12 12.01 20.73 6.96"/><line x1="12" y1="22.08" x2="12" y2="12"/></svg>
+              <h2 className="card-title">Latest AI Diagnosis</h2>
+            </div>
             <Link href="/diagnostics" className="card-link">
               View All →
             </Link>
@@ -245,7 +375,7 @@ export default function DashboardPage() {
               <span>AI analysis will appear when anomalies are detected</span>
             </div>
           ) : (
-            <DiagnosticCard diagnostic={diagnostics[0]} />
+            <DiagnosticCard diagnostic={diagnostics[0]} href={`/diagnostics/${diagnostics[0].id}`} />
           )}
         </div>
       </div>
@@ -253,7 +383,10 @@ export default function DashboardPage() {
       {/* LLM API Request Logs Section */}
       <div className="card animate-slide-up animate-delay-3" style={{ marginTop: '24px' }}>
         <div className="card-header">
-          <h2 className="card-title">LLM API Request Logs</h2>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><polyline points="4 17 10 11 4 5"/><line x1="12" y1="19" x2="20" y2="19"/></svg>
+            <h2 className="card-title">LLM API Request Logs</h2>
+          </div>
           <span className="badge badge-info">{logs.length} calls</span>
         </div>
         <div className="logs-table-wrapper" style={{ overflowX: 'auto', marginTop: '12px' }}>
@@ -350,6 +483,9 @@ function getAnomalyTitle(type) {
     case 'event_loop': return 'Event Loop Block';
     case 'latency': return 'High Latency';
     case 'error_rate': return 'Error Burst';
+    case 'db_latency': return 'DB Degradation';
+    case 'network_latency': return 'Network Delay';
+    case 'runtime_error': return 'Runtime Error';
     default: return 'Anomaly';
   }
 }
@@ -366,6 +502,12 @@ function getAnomalyDetail(anomaly) {
       return `${anomaly.current_value.toFixed(1)}ms latency (threshold: ${anomaly.threshold}ms)`;
     case 'error_rate':
       return `${anomaly.current_value.toFixed(2)}/s error rate (threshold: ${anomaly.threshold}/s)`;
+    case 'db_latency':
+      return `${anomaly.current_value.toFixed(1)}ms DB query (threshold: ${anomaly.threshold}ms)`;
+    case 'network_latency':
+      return `${anomaly.current_value.toFixed(1)}ms Net API (threshold: ${anomaly.threshold}ms)`;
+    case 'runtime_error':
+      return anomaly.details || `${anomaly.current_value.toFixed(0)} runtime error(s)`;
     default:
       return `${anomaly.current_value.toFixed(1)} (threshold: ${anomaly.threshold})`;
   }
@@ -396,6 +538,7 @@ function getAnomalyIcon(type) {
         </svg>
       );
     case 'error_rate':
+    case 'runtime_error':
       return (
         <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
           <path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z" />
@@ -404,9 +547,18 @@ function getAnomalyIcon(type) {
         </svg>
       );
     case 'latency':
+    case 'network_latency':
       return (
         <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
           <polyline points="22 12 18 12 15 21 9 3 6 12 2 12" />
+        </svg>
+      );
+    case 'db_latency':
+      return (
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+          <ellipse cx="12" cy="5" rx="9" ry="3"/>
+          <path d="M21 12c0 1.66-4 3-9 3s-9-1.34-9-3"/>
+          <path d="M3 5v14c0 1.66 4 3 9 3s9-1.34 9-3V5"/>
         </svg>
       );
     case 'memory':

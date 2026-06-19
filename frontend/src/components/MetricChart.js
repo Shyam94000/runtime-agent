@@ -38,67 +38,49 @@ export default function MetricChart({ data = [], thresholds }) {
     const timestamps = data.map((d) => formatTime(d.timestamp));
     const cpuValues = data.map((d) => d.cpu_percent ?? 0);
     const memValues = data.map((d) => d.memory_mb ?? 0);
-    const heapValues = data.map((d) => d.heap_used_mb ?? 0);
 
-    /* ---------- threshold markLine for CPU series ---------- */
-    const cpuMarkLine = thresholds?.cpu
-      ? {
-          silent: true,
-          symbol: 'none',
-          lineStyle: { type: 'dashed', color: '#f85149', width: 1.5 },
-          label: {
-            formatter: `CPU {c}%`,
-            position: 'insideEndTop',
-            color: '#f85149',
-            fontSize: 11,
-          },
-          data: [{ yAxis: thresholds.cpu }],
-        }
-      : undefined;
-
+    /* ---------- no cpu markline anymore ---------- */
+    
     return {
       backgroundColor: 'transparent',
-      animation: true,
-      animationDuration: 500,
-      animationEasing: 'cubicInOut',
+      animation: false,
+      aria: { enabled: false },
 
       /* ---- tooltip ---- */
       tooltip: {
         trigger: 'axis',
-        backgroundColor: '#1c2028',
-        borderColor: '#30363d',
+        backgroundColor: '#ffffff',
+        borderColor: '#000000',
         borderWidth: 1,
-        borderRadius: 8,
+        borderRadius: 0,
         padding: [10, 14],
-        textStyle: { color: '#c9d1d9', fontSize: 12 },
-        axisPointer: { lineStyle: { color: 'rgba(88,166,255,0.25)', width: 1 } },
-        formatter(params) {
-          let html = `<div style="margin-bottom:6px;font-weight:600;color:#e6edf3">${params[0].axisValueLabel}</div>`;
-          params.forEach((p) => {
-            const dot = `<span style="display:inline-block;width:8px;height:8px;border-radius:50%;background:${p.color};margin-right:6px"></span>`;
-            const unit = p.seriesName === 'CPU %' ? '%' : ' MB';
-            html += `<div style="line-height:1.8">${dot}${p.seriesName}: <b>${p.value}${unit}</b></div>`;
-          });
-          return html;
-        },
+        textStyle: { color: '#000000', fontSize: 12, fontFamily: 'var(--font-sans)' },
+        axisPointer: { 
+          lineStyle: { color: '#000000', width: 1, type: 'solid' },
+          label: { show: false }
+        }
       },
 
       /* ---- legend ---- */
       legend: {
-        top: 4,
-        right: 0,
-        textStyle: { color: '#8b949e', fontSize: 11 },
-        icon: 'roundRect',
-        itemWidth: 14,
-        itemHeight: 3,
+        bottom: 0,
+        left: 'center',
+        textStyle: { color: '#000000', fontSize: 12, fontFamily: 'var(--font-serif)' },
+        icon: 'path://M0,0 L20,0',
+        itemWidth: 24,
+        itemHeight: 2,
+        data: [
+          { name: 'CPU %', icon: 'path://M0,0 L20,0' },
+          { name: 'Memory MB', icon: 'path://M0,0 L10,0 M15,0 L20,0' }
+        ]
       },
 
       /* ---- grid ---- */
       grid: {
-        top: 40,
+        top: 20,
         left: 56,
-        right: 62,
-        bottom: 32,
+        right: 40,
+        bottom: 50,
         containLabel: false,
       },
 
@@ -107,89 +89,40 @@ export default function MetricChart({ data = [], thresholds }) {
         type: 'category',
         data: timestamps,
         boundaryGap: false,
-        axisLine: { lineStyle: { color: 'rgba(48,54,61,0.4)' } },
-        axisTick: { show: false },
-        axisLabel: { color: '#8b949e', fontSize: 10, margin: 10 },
+        axisLine: { lineStyle: { color: '#000000', width: 1 } },
+        axisTick: { show: true, lineStyle: { color: '#000000' } },
+        axisLabel: { color: '#000000', fontSize: 10, margin: 10, fontFamily: 'var(--font-sans)' },
         splitLine: { show: false },
       },
 
-      /* ---- Y axes ---- */
-      yAxis: [
-        {
-          type: 'value',
-          name: 'CPU %',
-          nameTextStyle: { color: '#58a6ff', fontSize: 11, padding: [0, 40, 0, 0] },
-          min: 0,
-          max: 100,
-          splitNumber: 5,
-          axisLine: { show: true, lineStyle: { color: 'rgba(48,54,61,0.4)' } },
-          axisTick: { show: false },
-          axisLabel: { color: '#8b949e', fontSize: 10, formatter: '{value}%' },
-          splitLine: { lineStyle: { color: 'rgba(48,54,61,0.4)', type: 'dashed' } },
-        },
-        {
-          type: 'value',
-          name: 'Memory MB',
-          nameTextStyle: { color: '#3fb950', fontSize: 11, padding: [0, 0, 0, 40] },
-          axisLine: { show: true, lineStyle: { color: 'rgba(48,54,61,0.4)' } },
-          axisTick: { show: false },
-          axisLabel: { color: '#8b949e', fontSize: 10, formatter: '{value}' },
-          splitLine: { show: false },
-        },
-      ],
+      /* ---- Y axis ---- */
+      yAxis: {
+        type: 'value',
+        axisLine: { show: true, lineStyle: { color: '#000000', width: 1 } },
+        axisTick: { show: true, lineStyle: { color: '#000000' } },
+        axisLabel: { color: '#000000', fontSize: 10, fontFamily: 'var(--font-sans)' },
+        splitLine: { show: false },
+      },
 
       /* ---- series ---- */
       series: [
         {
           name: 'CPU %',
           type: 'line',
-          smooth: true,
+          smooth: false,
           symbol: 'none',
-          yAxisIndex: 0,
           data: cpuValues,
-          lineStyle: { color: '#58a6ff', width: 2 },
-          itemStyle: { color: '#58a6ff' },
-          areaStyle: {
-            color: {
-              type: 'linear',
-              x: 0, y: 0, x2: 0, y2: 1,
-              colorStops: [
-                { offset: 0, color: 'rgba(88,166,255,0.20)' },
-                { offset: 1, color: 'rgba(88,166,255,0.00)' },
-              ],
-            },
-          },
-          markLine: cpuMarkLine,
+          lineStyle: { color: '#000000', width: 2, type: 'solid' },
+          itemStyle: { color: '#000000' },
         },
         {
           name: 'Memory MB',
           type: 'line',
-          smooth: true,
+          smooth: false,
           symbol: 'none',
-          yAxisIndex: 1,
           data: memValues,
-          lineStyle: { color: '#3fb950', width: 2 },
-          itemStyle: { color: '#3fb950' },
-          areaStyle: {
-            color: {
-              type: 'linear',
-              x: 0, y: 0, x2: 0, y2: 1,
-              colorStops: [
-                { offset: 0, color: 'rgba(63,185,80,0.18)' },
-                { offset: 1, color: 'rgba(63,185,80,0.00)' },
-              ],
-            },
-          },
-        },
-        {
-          name: 'Heap Used',
-          type: 'line',
-          smooth: true,
-          symbol: 'none',
-          yAxisIndex: 1,
-          data: heapValues,
-          lineStyle: { color: '#d29922', width: 1.5, type: 'dashed' },
-          itemStyle: { color: '#d29922' },
+          lineStyle: { color: '#000000', width: 2, type: 'dashed' },
+          itemStyle: { color: '#000000' },
         },
       ],
     };
@@ -229,12 +162,12 @@ export default function MetricChart({ data = [], thresholds }) {
   }
 
   return (
-    <div className="chart-container">
+    <div className="chart-container" title="">
       <ReactECharts
         option={option}
         style={{ width: '100%', height: 280 }}
         opts={{ renderer: 'canvas' }}
-        notMerge={false}
+        notMerge={true}
         lazyUpdate={true}
       />
     </div>

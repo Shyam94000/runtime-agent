@@ -27,6 +27,7 @@ class ToolCall:
     """A normalised tool/function call extracted from any provider's response."""
     name: str
     arguments: dict[str, Any]
+    raw_part: Any = None
 
 
 @dataclass
@@ -163,13 +164,18 @@ class GeminiProvider(LLMProvider):
                 )
             elif role == "assistant_tool_call":
                 # Re-emit the assistant's tool-call turn so Gemini sees the flow
+                raw_part = msg.get("raw_part")
+                if raw_part is not None:
+                    part_to_use = raw_part
+                else:
+                    part_to_use = types.Part.from_function_call(
+                        name=msg["tool_name"],
+                        args=msg["tool_args"],
+                    )
                 contents.append(
                     types.Content(
                         role="model",
-                        parts=[types.Part.from_function_call(
-                            name=msg["tool_name"],
-                            args=msg["tool_args"],
-                        )],
+                        parts=[part_to_use],
                     )
                 )
             elif role == "assistant":
@@ -211,6 +217,7 @@ class GeminiProvider(LLMProvider):
                 result.tool_calls.append(ToolCall(
                     name=fc.name,
                     arguments=dict(fc.args) if fc.args else {},
+                    raw_part=part,
                 ))
             elif part.text:
                 result.text = (result.text or "") + part.text

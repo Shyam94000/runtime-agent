@@ -16,7 +16,7 @@ function addToCache(key, data) {
   leakedData.push({
     key,
     data,
-    buffer: Buffer.alloc(1024 * 1024), // 1 MB allocation per call
+    payload: new Array(150000).fill(0).map(() => Math.random().toString(36)),
     timestamp: Date.now(),
   });
   return leakedData.length;

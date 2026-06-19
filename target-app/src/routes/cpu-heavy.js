@@ -13,7 +13,7 @@ const router = express.Router();
 
 router.get('/', async (req, res) => {
   const n = parseInt(req.query.n) || 35; // a smaller N, ~100ms
-  const duration = 8000; // run for 8 seconds
+  const duration = 20000; // run for 20 seconds to trigger anomaly
   const start = process.hrtime.bigint();
   const endTime = Date.now() + duration;
 

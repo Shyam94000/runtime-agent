@@ -35,6 +35,7 @@ class Settings(BaseSettings):
     data_file: str = Field(default="./data/runtime-monitor.json", alias="DATA_FILE")
     agent_max_steps: int = Field(default=10, alias="AGENT_MAX_STEPS")
     agent_timeout_seconds: int = Field(default=120, alias="AGENT_TIMEOUT_SECONDS")
+    diagnosis_mode: str = Field(default="agent_loop", alias="DIAGNOSIS_MODE")
 
     model_config = SettingsConfigDict(
         env_file=".env",

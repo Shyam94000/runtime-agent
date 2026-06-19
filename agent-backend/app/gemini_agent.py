@@ -1,11 +1,17 @@
 import asyncio
 import json
+import re
 import time
 from typing import Any
 
 from app.config import settings
 from app.models import AnomalyEvent, DiagnosticReport, MetricPoint, SourceContext, AgentStep, AgentTrace
-from app.prompts import AGENT_SYSTEM_PROMPT, INITIAL_ANOMALY_PROMPT
+from app.prompts import (
+    AGENT_SYSTEM_PROMPT,
+    INITIAL_ANOMALY_PROMPT,
+    SINGLE_CALL_DIAGNOSIS_PROMPT,
+    SINGLE_CALL_DIAGNOSIS_SYSTEM_PROMPT,
+)
 from app.agent_tools import create_tools
 from app.agent_memory import AgentMemory
 from app.llm_router import router, LLMResponse
@@ -62,10 +68,23 @@ class AgenticDiagnosticAgent:
                 full_context=full_context,
             )
 
-            report = await asyncio.wait_for(
-                asyncio.to_thread(self._run_agent_loop, anomaly, initial_prompt, trace, source_context),
-                timeout=getattr(settings, 'agent_timeout_seconds', 120),
-            )
+            if getattr(settings, "diagnosis_mode", "single_call") == "agent_loop":
+                report = await asyncio.wait_for(
+                    asyncio.to_thread(self._run_agent_loop, anomaly, initial_prompt, trace, source_context),
+                    timeout=getattr(settings, 'agent_timeout_seconds', 120),
+                )
+            else:
+                report = await asyncio.wait_for(
+                    asyncio.to_thread(
+                        self._run_single_call_diagnosis,
+                        anomaly,
+                        metrics_context,
+                        full_context,
+                        trace,
+                        source_context,
+                    ),
+                    timeout=getattr(settings, 'agent_timeout_seconds', 120),
+                )
             report.agent_trace_id = trace.id
             return report, trace
         except Exception as e:
@@ -83,6 +102,84 @@ class AgenticDiagnosticAgent:
             report.agent_trace_id = trace.id
             return report, trace
 
+    def _run_single_call_diagnosis(
+        self,
+        anomaly: AnomalyEvent,
+        metrics_context: list[MetricPoint],
+        full_context: str,
+        trace: AgentTrace,
+        source_context: SourceContext | None,
+    ) -> DiagnosticReport:
+        source = source_context.source_code if source_context else "No source context found."
+        prompt = SINGLE_CALL_DIAGNOSIS_PROMPT.format(
+            anomaly_id=anomaly.id,
+            anomaly_type=anomaly.type.value,
+            current_value=round(anomaly.current_value, 2),
+            threshold=round(anomaly.threshold, 2),
+            severity=anomaly.severity,
+            details=anomaly.details,
+            metrics_context=json.dumps([m.model_dump(mode="json") for m in metrics_context[-20:]], indent=2),
+            call_stack=json.dumps(anomaly.call_stack, indent=2),
+            file_path=source_context.relative_file_path if source_context else "unknown",
+            line_range=f"{source_context.start_line}-{source_context.end_line}" if source_context else "unknown",
+            source_code=source,
+            full_context=full_context,
+        )
+
+        start_time = time.time()
+        response = router.generate(
+            messages=[{"role": "user", "content": prompt}],
+            tools=None,
+            system_prompt=SINGLE_CALL_DIAGNOSIS_SYSTEM_PROMPT,
+            anomaly_id=anomaly.id,
+        )
+        actual_model = f"{response.provider_name}/{response.model_name}"
+        trace.model_used = actual_model
+        payload = self._parse_json_response(response.text or "")
+
+        trace.status = "completed"
+        trace.completed_at = utc_now()
+        trace.steps.append(AgentStep(
+            step_number=1,
+            type="conclusion",
+            reasoning=str(payload.get("root_cause_summary") or "Single-call diagnosis completed."),
+            duration_ms=(time.time() - start_time) * 1000,
+        ))
+        trace.total_steps = len(trace.steps)
+
+        return DiagnosticReport(
+            anomaly_id=anomaly.id,
+            severity=anomaly.severity,
+            agent_trace_id=trace.id,
+            investigation_steps=1,
+            tools_used=[],
+            model_used=actual_model,
+            root_cause_summary=str(payload.get("root_cause_summary") or "Anomaly detected"),
+            root_cause_function=str(payload.get("root_cause_function") or ""),
+            root_cause_file=str(payload.get("root_cause_file") or (source_context.relative_file_path if source_context else "")),
+            root_cause_lines=str(payload.get("root_cause_lines") or ""),
+            explanation=str(payload.get("explanation") or ""),
+            suggested_fix=str(payload.get("suggested_fix") or ""),
+            fix_justification=str(payload.get("fix_justification") or ""),
+            confidence_score=float(payload.get("confidence_score") or 0.75),
+            source_code_context=source if source_context else "",
+        )
+
+    def _parse_json_response(self, text: str) -> dict[str, Any]:
+        cleaned = text.strip()
+        fenced = re.search(r"```(?:json)?\s*(\{.*?\})\s*```", cleaned, flags=re.DOTALL)
+        if fenced:
+            cleaned = fenced.group(1)
+        else:
+            start = cleaned.find("{")
+            end = cleaned.rfind("}")
+            if start != -1 and end != -1 and end > start:
+                cleaned = cleaned[start:end + 1]
+        parsed = json.loads(cleaned)
+        if not isinstance(parsed, dict):
+            raise ValueError("Diagnosis response was not a JSON object.")
+        return parsed
+
     def _run_agent_loop(
         self,
         anomaly: AnomalyEvent,
@@ -98,6 +195,18 @@ class AgenticDiagnosticAgent:
         actual_model = "unknown"
 
         for step_num in range(self.max_steps):
+            if getattr(self.tool_context.monitor.config, 'llm_kill_switch', False):
+                trace.status = "failed"
+                trace.completed_at = utc_now()
+                trace.steps.append(AgentStep(
+                    step_number=step_num + 1,
+                    type="conclusion",
+                    reasoning="Diagnosis aborted: LLM Kill Switch activated during investigation.",
+                    duration_ms=0
+                ))
+                trace.total_steps = len(trace.steps)
+                return self._create_error_report(anomaly, "Diagnosis aborted: LLM Kill Switch activated during investigation.")
+
             start_time = time.time()
 
             # Retry up to 3 times (the router itself handles provider failover)
@@ -181,6 +290,7 @@ class AgenticDiagnosticAgent:
                     "tool_name": tool_name,
                     "tool_args": tool_args,
                     "tool_call_id": f"call_{step_num}_{tool_name}",
+                    "raw_part": getattr(tc, "raw_part", None),
                     "content": "",
                 })
                 messages.append({

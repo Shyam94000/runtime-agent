@@ -1,6 +1,7 @@
 'use client';
 
 import React from 'react';
+import { useRouter } from 'next/navigation';
 
 /**
  * Severity-to-colour mapping used for the left-border accent
@@ -94,9 +95,12 @@ function formatRelativeTime(timestamp) {
  * and navigation affordance.
  *
  * @param {Object}   diagnostic  Full diagnostic record from the API
- * @param {Function} onClick     Callback invoked with the diagnostic on click
+ * @param {string}   href        Optional route to open when the card is clicked
+ * @param {Function} onClick     Optional callback invoked with the diagnostic on click
  */
-export default function DiagnosticCard({ diagnostic, onClick }) {
+export default function DiagnosticCard({ diagnostic, href, onClick }) {
+  const router = useRouter();
+
   if (!diagnostic) return null;
 
   const {
@@ -121,18 +125,29 @@ export default function DiagnosticCard({ diagnostic, onClick }) {
       ? `${root_cause_file}:${root_cause_lines}`
       : root_cause_file
     : null;
+  const interactive = Boolean(href || onClick);
+
+  const openCard = () => {
+    if (onClick) {
+      onClick(diagnostic);
+      return;
+    }
+    if (href) {
+      router.push(href);
+    }
+  };
 
   return (
     <div
       className="diagnostic-card animate-slide-up"
-      onClick={() => onClick && onClick(diagnostic)}
-      style={{ borderLeftColor: accentColor, cursor: 'pointer' }}
-      role="button"
-      tabIndex={0}
+      onClick={interactive ? openCard : undefined}
+      style={{ borderLeftColor: accentColor, cursor: interactive ? 'pointer' : 'default' }}
+      role={interactive ? 'link' : undefined}
+      tabIndex={interactive ? 0 : undefined}
       onKeyDown={(e) => {
-        if (e.key === 'Enter' || e.key === ' ') {
+        if (interactive && (e.key === 'Enter' || e.key === ' ')) {
           e.preventDefault();
-          onClick && onClick(diagnostic);
+          openCard();
         }
       }}
     >
@@ -212,14 +227,14 @@ export default function DiagnosticCard({ diagnostic, onClick }) {
           </span>
           <span>{confidencePercent}%</span>
         </div>
-        <div className="confidence-bar">
+        <div className="confidence-bar" style={{ border: '2px solid #000', background: '#fff', borderRadius: 0, height: 12 }}>
           <div
             className="confidence-bar-fill"
             style={{
               width: `${confidencePercent}%`,
-              background: accentColor,
+              background: '#000000',
               height: '100%',
-              borderRadius: 'inherit',
+              borderRadius: 0,
               transition: 'width 0.4s ease',
             }}
           />
@@ -246,6 +261,7 @@ export default function DiagnosticCard({ diagnostic, onClick }) {
             fontSize: 12,
             color: '#58a6ff',
             fontWeight: 500,
+            visibility: interactive ? 'visible' : 'hidden',
           }}
         >
           View Full Report →

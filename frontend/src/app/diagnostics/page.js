@@ -1,18 +1,16 @@
 'use client';
 
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import Link from 'next/link';
 import { getDiagnostics, clearDiagnostics } from '@/lib/api';
 import DiagnosticCard from '@/components/DiagnosticCard';
-import { useRouter } from 'next/navigation';
 
 export default function DiagnosticsListPage() {
   const [diagnostics, setDiagnostics] = useState([]);
   const [loading, setLoading] = useState(true);
   const [clearing, setClearing] = useState(false);
-  const router = useRouter();
 
-  const fetchDiagnostics = async () => {
+  const fetchDiagnostics = useCallback(async () => {
     try {
       const data = await getDiagnostics();
       setDiagnostics(data);
@@ -21,13 +19,36 @@ export default function DiagnosticsListPage() {
     } finally {
       setLoading(false);
     }
-  };
+  }, []);
 
   useEffect(() => {
-    fetchDiagnostics();
-    const interval = setInterval(fetchDiagnostics, 10000);
-    return () => clearInterval(interval);
-  }, []);
+    const initialRefresh = setTimeout(fetchDiagnostics, 0);
+    const fallbackRefresh = setInterval(fetchDiagnostics, 60000);
+    const wsUrl = process.env.NEXT_PUBLIC_WS_URL || 'ws://localhost:8000/api/ws';
+    const ws = new WebSocket(wsUrl);
+
+    ws.onmessage = (event) => {
+      try {
+        const msg = JSON.parse(event.data);
+        if (msg.type === 'diagnostic_completed') {
+          const diagnostic = msg.data;
+          setDiagnostics((prev) => [
+            diagnostic,
+            ...prev.filter((item) => item.id !== diagnostic.id && item.anomaly_id !== diagnostic.anomaly_id),
+          ]);
+          setLoading(false);
+        }
+      } catch (err) {
+        console.error('Failed to parse WebSocket message:', err);
+      }
+    };
+
+    return () => {
+      clearTimeout(initialRefresh);
+      clearInterval(fallbackRefresh);
+      ws.close();
+    };
+  }, [fetchDiagnostics]);
 
   const handleClear = async () => {
     if (!confirm('Are you sure you want to clear all diagnostics?')) return;
@@ -94,7 +115,7 @@ export default function DiagnosticsListPage() {
               <div key={diag.id} className={`animate-slide-up animate-delay-${Math.min(index + 1, 4)}`}>
                 <DiagnosticCard
                   diagnostic={diag}
-                  onClick={() => router.push(`/diagnostics/${diag.id}`)}
+                  href={`/diagnostics/${diag.id}`}
                 />
               </div>
             ))}

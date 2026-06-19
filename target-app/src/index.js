@@ -18,6 +18,8 @@ const healthyRoute = require('./routes/healthy');
 const eventLoopBlockRoute = require('./routes/event-loop-block');
 const errorBurstRoute = require('./routes/error-burst');
 const unhandledRejectionRoute = require('./routes/unhandled-rejection');
+const dbDegradationRoute = require('./routes/db-degradation');
+const networkDelayRoute = require('./routes/network-delay');
 
 // ── Event Loop Lag Monitoring ──────────────────────────────────
 // Uses perf_hooks histogram for high-resolution event loop delay
@@ -63,6 +65,21 @@ process.on('uncaughtException', (err) => {
 const latencyWindow = [];
 const MAX_LATENCY_SAMPLES = 1000;
 
+global.dbLatencyWindow = [];
+global.networkLatencyWindow = [];
+
+// Simulate constant background healthy traffic for DB and Network
+// This ensures that latencies decay back to normal even when there is no incoming traffic
+setInterval(() => {
+  for (let i = 0; i < 5; i++) {
+    global.dbLatencyWindow.push(Math.random() * 5 + 2);
+    if (global.dbLatencyWindow.length > MAX_LATENCY_SAMPLES) global.dbLatencyWindow.shift();
+    
+    global.networkLatencyWindow.push(Math.random() * 10 + 5);
+    if (global.networkLatencyWindow.length > MAX_LATENCY_SAMPLES) global.networkLatencyWindow.shift();
+  }
+}, 1000);
+
 const requestLogs = [];
 const MAX_REQUEST_LOGS = 100;
 
@@ -74,7 +91,7 @@ function computePercentile(sortedArr, pct) {
 
 // ── Error Rate Tracking ────────────────────────────────────────
 // Counts 5xx responses in a rolling 60-second window.
-const errorTracker = {
+global.errorTracker = {
   total: 0,
   timestamps: [],   // rolling 60s window of error timestamps
   recentErrors: [],  // last 20 error details
@@ -108,9 +125,9 @@ app.use((req, res, next) => {
     // Track 5xx errors
     if (res.statusCode >= 500) {
       const now = Date.now();
-      errorTracker.total++;
-      errorTracker.timestamps.push(now);
-      errorTracker.recentErrors.push({
+      global.errorTracker.total++;
+      global.errorTracker.timestamps.push(now);
+      global.errorTracker.recentErrors.push({
         statusCode: res.statusCode,
         path: req.path,
         method: req.method,
@@ -118,10 +135,10 @@ app.use((req, res, next) => {
       });
       // Trim to 60s window
       const cutoff = now - 60000;
-      errorTracker.timestamps = errorTracker.timestamps.filter((t) => t > cutoff);
+      global.errorTracker.timestamps = global.errorTracker.timestamps.filter((t) => t > cutoff);
       // Keep only last 20 error details
-      if (errorTracker.recentErrors.length > 20) {
-        errorTracker.recentErrors = errorTracker.recentErrors.slice(-20);
+      if (global.errorTracker.recentErrors.length > 20) {
+        global.errorTracker.recentErrors = global.errorTracker.recentErrors.slice(-20);
       }
     }
   });
@@ -186,6 +203,8 @@ app.use('/api/healthy', healthyRoute);
 app.use('/api/event-loop-block', eventLoopBlockRoute);
 app.use('/api/error-burst', errorBurstRoute);
 app.use('/api/unhandled-rejection', unhandledRejectionRoute);
+app.use('/api/db-degradation', dbDegradationRoute);
+app.use('/api/network-delay', networkDelayRoute);
 
 // ── Simple UI ──────────────────────────────────────────────────
 app.get('/', (req, res) => {
@@ -218,12 +237,14 @@ app.get('/', (req, res) => {
       
       <h3>Original Simulations</h3>
       <button onclick="trigger('/api/cpu-heavy')">Simulate CPU Spike (O(2^n))</button>
-      <button class="memory-btn" onclick="trigger('/api/memory-leak')">Simulate Memory Leak (1MB)</button>
+      <button class="memory-btn" onclick="trigger('/api/memory-leak?amount=15')">Simulate Memory Leak (15MB)</button>
       
       <h3>New Metric Simulations</h3>
       <button class="danger-btn" onclick="trigger('/api/event-loop-block?duration=500')">Block Event Loop (500ms)</button>
-      <button class="error-btn" onclick="trigger('/api/error-burst')">Trigger Error Burst (500)</button>
+      <button class="error-btn" onclick="trigger('/api/error-burst?count=35')">Trigger Error Burst (35 Errors)</button>
       <button class="rejection-btn" onclick="trigger('/api/unhandled-rejection')">Trigger Unhandled Rejection</button>
+      <button class="memory-btn" onclick="trigger('/api/db-degradation?duration=3000')">Simulate DB Degradation (3s)</button>
+      <button class="danger-btn" onclick="trigger('/api/network-delay?duration=4000')">Simulate Network Delay (4s)</button>
       
       <div style="margin-top: 1.5rem;">
         <h4>Last Response:</h4>
@@ -258,6 +279,10 @@ app.get('/health', (req, res) => {
 // It reports CPU usage, memory consumption, active requests, and
 // the call stacks of in-flight requests for profiling analysis.
 app.get('/api/metrics', (req, res) => {
+  res.json(generateMetricsPayload());
+});
+
+function generateMetricsPayload() {
   const mem = process.memoryUsage();
   const activeRequestList = Array.from(activeRequests.values())
     .filter((r) => r.path !== '/api/metrics') // exclude self
@@ -277,10 +302,14 @@ app.get('/api/metrics', (req, res) => {
   // Compute current error rate (errors in last 60s / 60)
   const now = Date.now();
   const cutoff = now - 60000;
-  const recentErrorTimestamps = errorTracker.timestamps.filter((t) => t > cutoff);
+  const recentErrorTimestamps = global.errorTracker.timestamps.filter((t) => t > cutoff);
   const errorRatePerSecond = recentErrorTimestamps.length / 60;
 
-  res.json({
+  // DB and Network Latency averages
+  const sortedDb = [...global.dbLatencyWindow].sort((a, b) => a - b);
+  const sortedNet = [...global.networkLatencyWindow].sort((a, b) => a - b);
+
+  const payload = {
     timestamp: new Date().toISOString(),
     cpu: {
       user: process.cpuUsage().user,
@@ -309,11 +338,13 @@ app.get('/api/metrics', (req, res) => {
       p99_ms: computePercentile(sortedLatencies, 99),
       avg_ms: parseFloat(avgLatency.toFixed(3)),
       sample_size: latencyWindow.length,
+      db_p95_ms: computePercentile(sortedDb, 95),
+      network_p95_ms: computePercentile(sortedNet, 95),
     },
     error_rate: {
-      total_5xx: errorTracker.total,
+      total_5xx: global.errorTracker.total,
       rate_per_second: parseFloat(errorRatePerSecond.toFixed(3)),
-      recent_errors: errorTracker.recentErrors.slice(-20),
+      recent_errors: global.errorTracker.recentErrors.slice(-20),
     },
     uncaught_errors: uncaughtErrors.slice(-20),
     uptime: parseFloat(process.uptime().toFixed(2)),
@@ -323,9 +354,10 @@ app.get('/api/metrics', (req, res) => {
     pid: process.pid,
     node_version: process.version,
     request_logs: requestLogs,
-  });
+  };
   eventLoopHistogram.reset();
-});
+  return payload;
+}
 
 // ── Built-in Profiling Endpoints ───────────────────────────────
 const inspector = require('node:inspector');
@@ -379,7 +411,7 @@ app.get('/api/profile', (req, res) => {
 });
 
 // ── Start Server ───────────────────────────────────────────────
-app.listen(PORT, () => {
+const server = app.listen(PORT, () => {
   console.log(`\n🎯 Target Application running on http://localhost:${PORT}`);
   console.log(`\n   Endpoints:`);
   console.log(`   GET /api/healthy              — Normal baseline response`);
@@ -391,5 +423,29 @@ app.listen(PORT, () => {
   console.log(`   GET /api/metrics              — Live process metrics`);
   console.log(`   GET /api/profile              — V8 CPU profiler (3s)`);
   console.log(`   GET /api/heap-snapshot        — V8 heap statistics`);
-  console.log(`   GET /health                   — Health check\n`);
+  console.log(`   GET /health                   — Health check`);
+  console.log(`   WS  ws://localhost:${PORT}             — Real-time WebSocket metrics stream\n`);
 });
+
+// ── WebSocket Server ───────────────────────────────────────────
+const { WebSocketServer } = require('ws');
+const wss = new WebSocketServer({ server });
+
+wss.on('connection', (ws) => {
+  console.log('🔗 WebSocket client connected to target-app');
+  // Send immediate initial payload
+  ws.send(JSON.stringify(generateMetricsPayload()));
+  
+  ws.on('close', () => console.log('❌ WebSocket client disconnected from target-app'));
+});
+
+// Broadcast metrics every 1 second
+setInterval(() => {
+  if (wss.clients.size === 0) return;
+  const payload = JSON.stringify(generateMetricsPayload());
+  for (const client of wss.clients) {
+    if (client.readyState === 1 /* WebSocket.OPEN */) {
+      client.send(payload);
+    }
+  }
+}, 1000);

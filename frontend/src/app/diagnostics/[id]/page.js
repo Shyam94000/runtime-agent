@@ -14,6 +14,8 @@ export default function DiagnosticDetailPage() {
 
   useEffect(() => {
     let intervalId = null;
+    const wsUrl = process.env.NEXT_PUBLIC_WS_URL || 'ws://localhost:8000/api/ws';
+    const ws = new WebSocket(wsUrl);
 
     const fetchReport = async () => {
       try {
@@ -40,6 +42,26 @@ export default function DiagnosticDetailPage() {
       }
     };
 
+    ws.onmessage = (event) => {
+      try {
+        const msg = JSON.parse(event.data);
+        if (msg.type !== 'diagnostic_completed') return;
+
+        const diagnostic = msg.data;
+        if (diagnostic.id === params.id || diagnostic.anomaly_id === params.id) {
+          setReport(diagnostic);
+          setError(null);
+          setLoading(false);
+          if (intervalId) {
+            clearInterval(intervalId);
+            intervalId = null;
+          }
+        }
+      } catch (err) {
+        console.error('Failed to parse WebSocket message:', err);
+      }
+    };
+
     if (params.id) {
       fetchReport();
     }
@@ -48,6 +70,7 @@ export default function DiagnosticDetailPage() {
       if (intervalId) {
         clearInterval(intervalId);
       }
+      ws.close();
     };
   }, [params.id]);
 
@@ -151,48 +174,23 @@ export default function DiagnosticDetailPage() {
             </span>
           </div>
         </div>
-        <div className="report-header-right">
-          <div className="confidence-ring">
-            <svg viewBox="0 0 100 100" className="confidence-svg">
-              <circle
-                cx="50" cy="50" r="42"
-                fill="none"
-                stroke="rgba(48,54,61,0.4)"
-                strokeWidth="8"
-              />
-              <circle
-                cx="50" cy="50" r="42"
-                fill="none"
-                stroke={severityColors[report.severity] || '#58a6ff'}
-                strokeWidth="8"
-                strokeLinecap="round"
-                strokeDasharray={`${(report.confidence_score || 0) * 264} 264`}
-                transform="rotate(-90 50 50)"
-                className="confidence-circle"
-              />
-            </svg>
-            <div className="confidence-value">
-              {Math.round((report.confidence_score || 0) * 100)}%
-            </div>
-            <div className="confidence-label">
+        <div className="report-header-right" style={{ minWidth: '200px' }}>
+          <div style={{ marginBottom: 4, display: 'flex', justifyContent: 'space-between', fontSize: 12, fontWeight: 600 }}>
+            <span>
               Confidence
               {report.model_used === 'local-fallback' && (
-                <div style={{
-                  background: 'rgba(210, 153, 34, 0.15)',
-                  color: '#d29922',
-                  padding: '2px 6px',
-                  borderRadius: '4px',
-                  fontSize: '9px',
-                  textTransform: 'uppercase',
-                  fontWeight: 600,
-                  border: '1px solid rgba(210, 153, 34, 0.3)',
-                  marginTop: '4px',
-                  display: 'inline-block'
-                }}>
-                  Fallback AI
-                </div>
+                <span style={{ marginLeft: 6, padding: '2px 6px', background: 'rgba(0,0,0,0.05)', border: '2px solid #000', borderRadius: 0, fontSize: 10, textTransform: 'uppercase' }}>Fallback AI</span>
               )}
-            </div>
+            </span>
+            <span>{Math.round((report.confidence_score || 0) * 100)}%</span>
+          </div>
+          <div style={{ width: '100%', height: 12, background: '#fff', borderRadius: 0, overflow: 'hidden', border: '2px solid #000' }}>
+            <div style={{
+              width: `${Math.round((report.confidence_score || 0) * 100)}%`,
+              height: '100%',
+              background: '#000',
+              transition: 'width 0.4s ease'
+            }} />
           </div>
         </div>
       </div>

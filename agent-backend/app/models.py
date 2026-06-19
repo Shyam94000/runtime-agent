@@ -16,6 +16,9 @@ class AnomalyType(str, Enum):
     event_loop = "event_loop"
     latency = "latency"
     error_rate = "error_rate"
+    db_latency = "db_latency"
+    network_latency = "network_latency"
+    runtime_error = "runtime_error"
 
 
 class CpuMetrics(BaseModel):
@@ -48,6 +51,8 @@ class ResponseLatencyMetrics(BaseModel):
     p99_ms: float = 0.0
     avg_ms: float = 0.0
     sample_size: int = 0
+    db_p95_ms: float = 0.0
+    network_p95_ms: float = 0.0
 
 
 class ErrorRateMetrics(BaseModel):
@@ -102,6 +107,8 @@ class MetricPoint(BaseModel):
     response_latency_p99_ms: float = 0.0
     error_rate_per_sec: float = 0.0
     uncaught_error_count: int = 0
+    db_p95_ms: float = 0.0
+    network_p95_ms: float = 0.0
 
 
 class AnomalyEvent(BaseModel):
@@ -154,6 +161,8 @@ class MonitorConfig(BaseModel):
     latency_p99_threshold_ms: float = 500.0
     error_rate_threshold: float = 0.5
     llm_kill_switch: bool = False
+    db_latency_threshold_ms: float = 2000.0
+    network_latency_threshold_ms: float = 3000.0
 
 
 class SystemStatus(BaseModel):

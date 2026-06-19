@@ -9,6 +9,8 @@ export default function SettingsPage() {
     memory_growth_rate: 10,
     poll_interval: 5,
     llm_kill_switch: false,
+    db_latency_threshold_ms: 2000,
+    network_latency_threshold_ms: 3000,
   });
   const [status, setStatus] = useState(null);
   const [saving, setSaving] = useState(false);
@@ -56,6 +58,8 @@ export default function SettingsPage() {
       memory_growth_rate: 10,
       poll_interval: 5,
       llm_kill_switch: false,
+      db_latency_threshold_ms: 2000,
+      network_latency_threshold_ms: 3000,
     });
   };
 
@@ -184,6 +188,72 @@ export default function SettingsPage() {
               <div className="threshold-preview">
                 <span className={`status-dot ${config.memory_growth_rate <= 5 ? 'warning' : 'healthy'}`} />
                 <span>Trigger anomaly when memory growth &gt; {config.memory_growth_rate} MB/min</span>
+              </div>
+            </div>
+
+            {/* DB Latency Threshold */}
+            <div className="form-group">
+              <label className="form-label" htmlFor="db-threshold">
+                Database Latency Threshold (ms)
+              </label>
+              <p className="form-hint">
+                Alert when DB queries take longer than this threshold for 3 consecutive polls
+              </p>
+              <div className="form-slider-group">
+                <input
+                  type="range"
+                  id="db-threshold"
+                  className="form-slider"
+                  min="50"
+                  max="5000"
+                  step="50"
+                  value={config.db_latency_threshold_ms}
+                  onChange={(e) => setConfig({ ...config, db_latency_threshold_ms: Number(e.target.value) })}
+                />
+                <div className="form-input-wrapper">
+                  <input
+                    type="number"
+                    className="form-input form-input-sm"
+                    value={config.db_latency_threshold_ms}
+                    onChange={(e) => setConfig({ ...config, db_latency_threshold_ms: Number(e.target.value) })}
+                    min="50"
+                    max="5000"
+                  />
+                  <span className="form-input-suffix">ms</span>
+                </div>
+              </div>
+            </div>
+
+            {/* Network Latency Threshold */}
+            <div className="form-group">
+              <label className="form-label" htmlFor="net-threshold">
+                Network API Latency Threshold (ms)
+              </label>
+              <p className="form-hint">
+                Alert when downstream Network API calls take longer than this threshold
+              </p>
+              <div className="form-slider-group">
+                <input
+                  type="range"
+                  id="net-threshold"
+                  className="form-slider"
+                  min="50"
+                  max="5000"
+                  step="50"
+                  value={config.network_latency_threshold_ms}
+                  onChange={(e) => setConfig({ ...config, network_latency_threshold_ms: Number(e.target.value) })}
+                />
+                <div className="form-input-wrapper">
+                  <input
+                    type="number"
+                    className="form-input form-input-sm"
+                    value={config.network_latency_threshold_ms}
+                    onChange={(e) => setConfig({ ...config, network_latency_threshold_ms: Number(e.target.value) })}
+                    min="50"
+                    max="5000"
+                  />
+                  <span className="form-input-suffix">ms</span>
+                </div>
               </div>
             </div>
 
