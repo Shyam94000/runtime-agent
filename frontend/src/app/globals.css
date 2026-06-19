@@ -438,17 +438,17 @@ input, textarea, select {
 }
 
 .code-line.added {
-  background: rgba(46, 160, 67, 0.15);
-  border-left-color: #2ea043;
+  background: var(--success-muted);
+  border-left-color: var(--success);
 }
 
 .code-line.removed {
-  background: rgba(248, 81, 73, 0.15);
-  border-left-color: #f85149;
+  background: var(--error-muted);
+  border-left-color: var(--error);
 }
 
 .code-line.highlighted {
-  background: rgba(210, 153, 34, 0.1);
+  background: var(--warning-muted);
   border-left-color: var(--warning);
 }
 
@@ -468,21 +468,21 @@ input, textarea, select {
   font-size: 0.875rem;
   font-weight: 500;
   animation: slideDown 0.35s ease forwards;
+  background: var(--bg-surface);
+  border-bottom: 2px solid var(--border-default);
+  color: var(--text-primary);
 }
 
 .alert-banner.critical {
-  background: linear-gradient(90deg, rgba(248, 81, 73, 0.92), rgba(248, 81, 73, 0.8));
-  color: #fff;
+  border-left: 4px solid var(--error);
 }
 
 .alert-banner.warning {
-  background: linear-gradient(90deg, rgba(210, 153, 34, 0.92), rgba(210, 153, 34, 0.8));
-  color: #fff;
+  border-left: 4px solid var(--warning);
 }
 
 .alert-banner.info {
-  background: linear-gradient(90deg, rgba(88, 166, 255, 0.92), rgba(88, 166, 255, 0.8));
-  color: #fff;
+  border-left: 4px solid var(--accent);
 }
 
 .alert-banner .dismiss-btn {
@@ -1571,7 +1571,7 @@ input, textarea, select {
   margin-top: var(--space-4);
   padding: var(--space-4) var(--space-5);
   background: var(--success-muted);
-  border: 1px solid rgba(63, 185, 80, 0.2);
+  border: 1px solid var(--success);
   border-radius: var(--radius-md);
 }
 
@@ -1760,17 +1760,18 @@ input, textarea, select {
 
 /* Alert variants */
 .alert-banner.alert-success {
-  background: linear-gradient(90deg, rgba(63, 185, 80, 0.92), rgba(63, 185, 80, 0.8));
-  color: #fff;
+  background: var(--success-muted);
+  color: var(--success);
+  border: 1px solid var(--success);
   position: relative;
   border-radius: var(--radius-md);
   margin-bottom: var(--space-4);
 }
 
 .alert-banner.alert-warning {
-  background: linear-gradient(90deg, rgba(210, 153, 34, 0.15), rgba(210, 153, 34, 0.1));
+  background: var(--warning-muted);
   color: var(--warning);
-  border: 1px solid rgba(210, 153, 34, 0.3);
+  border: 1px solid var(--warning);
   position: relative;
   border-radius: var(--radius-md);
   margin-bottom: var(--space-4);
@@ -1894,17 +1895,17 @@ input, textarea, select {
 }
 
 .log-method-get {
-  background-color: rgba(88, 166, 255, 0.15);
+  background-color: var(--accent-muted);
   color: var(--accent);
 }
 
 .log-method-post {
-  background-color: rgba(210, 153, 34, 0.15);
+  background-color: var(--warning-muted);
   color: var(--warning);
 }
 
 .log-method-delete {
-  background-color: rgba(248, 81, 73, 0.15);
+  background-color: var(--error-muted);
   color: var(--error);
 }
 
