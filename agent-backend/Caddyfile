@@ -1,0 +1,4 @@
+# Replace 1.2.3.4 with your Oracle VPS Public IP
+1.2.3.4.nip.io {
+    reverse_proxy backend:8000
+}
