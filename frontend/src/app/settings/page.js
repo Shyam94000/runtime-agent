@@ -377,7 +377,7 @@ export default function SettingsPage() {
             />
             <StatusRow
               label="Target Application"
-              value={status?.target_url || 'http://localhost:3001'}
+              value={status?.target_url || 'https://target.92.5.100.65.nip.io'}
             />
           </div>
         </div>
