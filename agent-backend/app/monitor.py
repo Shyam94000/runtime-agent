@@ -58,6 +58,13 @@ class RuntimeMonitor:
                 self.agent_traces, self.fixes = [], []
         except Exception:
             self.anomalies, self.diagnostics, self.agent_traces, self.fixes = [], [], [], []
+        if not settings.source_path.exists():
+            try:
+                import subprocess
+                settings.source_path.parent.mkdir(parents=True, exist_ok=True)
+                subprocess.run(["git", "clone", "https://github.com/Shyam94000/BuggyApp", str(settings.source_path)], check=True)
+            except Exception as e:
+                print(f"[Monitor] Auto-clone BuggyApp failed: {e}")
         self.memory = AgentMemory(settings.source_path, self.anomalies, self.diagnostics)
         self.started_at = time.monotonic()
         self.last_updated = datetime.now(timezone.utc)

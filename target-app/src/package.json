@@ -1,0 +1,14 @@
+{
+  "name": "target-app",
+  "version": "1.0.0",
+  "description": "Sample Node.js application with intentional performance issues for runtime monitoring",
+  "main": "src/index.js",
+  "scripts": {
+    "start": "node src/index.js",
+    "dev": "node --watch src/index.js"
+  },
+  "dependencies": {
+    "express": "^4.21.0",
+    "ws": "^8.21.0"
+  }
+}
