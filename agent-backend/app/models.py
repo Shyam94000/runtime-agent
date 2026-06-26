@@ -178,6 +178,7 @@ class MonitorConfig(BaseModel):
     throughput_drop_percent: float = 50.0
     github_token: str = ""
     github_repo: str = ""
+    last_updated: str | None = None
 
 
 class SystemStatus(BaseModel):
@@ -191,6 +192,7 @@ class SystemStatus(BaseModel):
     target_app_url: str
     source_path: str
     last_error: str | None = None
+    last_updated: datetime | None = None
 
 
 class AgentStep(BaseModel):

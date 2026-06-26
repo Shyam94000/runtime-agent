@@ -38,8 +38,8 @@ class Settings(BaseSettings):
 
     # Agent configuration
     data_file: str = Field(default="./data/runtime-monitor.json", alias="DATA_FILE")
-    agent_max_steps: int = Field(default=10, alias="AGENT_MAX_STEPS")
-    agent_timeout_seconds: int = Field(default=120, alias="AGENT_TIMEOUT_SECONDS")
+    agent_max_steps: int = Field(default=0, alias="AGENT_MAX_STEPS")  # 0 means unlimited
+    agent_timeout_seconds: int = Field(default=0, alias="AGENT_TIMEOUT_SECONDS")  # 0 means unlimited
     diagnosis_mode: str = Field(default="agent_loop", alias="DIAGNOSIS_MODE")
 
     github_token: str = Field(default="", alias="GITHUB_TOKEN")

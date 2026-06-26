@@ -41,6 +41,7 @@ class RuntimeMonitor:
             throughput_drop_percent=settings.throughput_drop_percent,
             github_token=settings.github_token,
             github_repo=settings.github_repo,
+            last_updated=datetime.now(timezone.utc).isoformat(),
         )
         self.metrics_history: list[RawMetricSnapshot] = []
         self.target_app_url = settings.target_app_url
@@ -59,6 +60,7 @@ class RuntimeMonitor:
             self.anomalies, self.diagnostics, self.agent_traces, self.fixes = [], [], [], []
         self.memory = AgentMemory(settings.source_path, self.anomalies, self.diagnostics)
         self.started_at = time.monotonic()
+        self.last_updated = datetime.now(timezone.utc)
         self.last_poll: datetime | None = None
         self.last_error: str | None = None
         self.target_reachable = False
@@ -663,7 +665,9 @@ class RuntimeMonitor:
         return None
 
     def update_config(self, config: MonitorConfig) -> MonitorConfig:
+        config.last_updated = datetime.now(timezone.utc).isoformat()
         self.config = config
+        self.last_updated = datetime.now(timezone.utc)
         return self.config
 
     def clear_all(self) -> None:
@@ -684,6 +688,7 @@ class RuntimeMonitor:
             target_app_url=settings.target_app_url,
             source_path=str(settings.source_path),
             last_error=self.last_error,
+            last_updated=self.last_updated,
         )
 
 

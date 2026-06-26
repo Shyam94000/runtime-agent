@@ -46,7 +46,7 @@ class AgenticDiagnosticAgent:
     def __init__(self, tool_context) -> None:
         self.tool_context = tool_context
         self.model_name = "multi-provider"
-        self.max_steps = getattr(settings, 'agent_max_steps', 5)
+        self.max_steps = getattr(settings, 'agent_max_steps', 0)
         self.tools = create_tools(tool_context)
         self.graph = self._build_graph()
 
@@ -227,7 +227,7 @@ class AgenticDiagnosticAgent:
     def _should_continue(self, state: AgentState) -> str:
         if state["report"] is not None:
              return "end"
-        if state["step_num"] >= self.max_steps:
+        if self.max_steps > 0 and state["step_num"] >= self.max_steps:
              return "end"
         last_message = state["messages"][-1]
         if isinstance(last_message, AIMessage) and last_message.tool_calls:
@@ -282,9 +282,11 @@ class AgenticDiagnosticAgent:
                 tool_context=self.tool_context
             )
 
+            recursion_limit = self.max_steps * 2 + 10 if self.max_steps > 0 else 1000000
+            timeout_sec = getattr(settings, 'agent_timeout_seconds', 0)
             final_state = await asyncio.wait_for(
-                self.graph.ainvoke(initial_state),
-                timeout=getattr(settings, 'agent_timeout_seconds', 120),
+                self.graph.ainvoke(initial_state, config={"recursion_limit": recursion_limit}),
+                timeout=timeout_sec if timeout_sec > 0 else None,
             )
 
             report = final_state.get("report")

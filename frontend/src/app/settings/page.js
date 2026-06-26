@@ -13,6 +13,7 @@ export default function SettingsPage() {
     network_latency_threshold_ms: 3000,
   });
   const [status, setStatus] = useState(null);
+  const [lastUpdated, setLastUpdated] = useState(null);
   const [saving, setSaving] = useState(false);
   const [saved, setSaved] = useState(false);
   const [error, setError] = useState(null);
@@ -25,8 +26,14 @@ export default function SettingsPage() {
           getConfig(),
           getSystemStatus(),
         ]);
-        if (configData.status === 'fulfilled') setConfig(configData.value);
-        if (statusData.status === 'fulfilled') setStatus(statusData.value);
+        if (configData.status === 'fulfilled') {
+          setConfig(configData.value);
+          if (configData.value.last_updated) setLastUpdated(configData.value.last_updated);
+        }
+        if (statusData.status === 'fulfilled') {
+          setStatus(statusData.value);
+          if (statusData.value.last_updated) setLastUpdated(statusData.value.last_updated);
+        }
       } catch (err) {
         setError('Failed to load configuration');
       } finally {
@@ -42,7 +49,9 @@ export default function SettingsPage() {
     setSaved(false);
     setError(null);
     try {
-      await updateConfig(config);
+      const res = await updateConfig(config);
+      if (res && res.last_updated) setLastUpdated(res.last_updated);
+      else setLastUpdated(new Date().toISOString());
       setSaved(true);
       setTimeout(() => setSaved(false), 3000);
     } catch (err) {
@@ -342,6 +351,12 @@ export default function SettingsPage() {
                 )}
               </button>
             </div>
+            {lastUpdated && (
+              <div className="threshold-preview" style={{ marginTop: '16px' }}>
+                <span className="status-dot healthy" />
+                <span>Last Updated: {new Date(lastUpdated).toLocaleString()}</span>
+              </div>
+            )}
           </div>
         </div>
 
@@ -362,6 +377,10 @@ export default function SettingsPage() {
             <StatusRow
               label="Last Poll"
               value={status?.last_poll ? new Date(status.last_poll).toLocaleTimeString() : '—'}
+            />
+            <StatusRow
+              label="Last Updated"
+              value={status?.last_updated ? new Date(status.last_updated).toLocaleString() : (lastUpdated ? new Date(lastUpdated).toLocaleString() : '—')}
             />
             <StatusRow
               label="Total Anomalies Detected"
